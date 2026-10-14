@@ -1,0 +1,216 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --fg:#1f2328; --muted:#656d76; --line:#d0d7de; --bg:#ffffff; --accent:#d1242f; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+               font:13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #bar { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; padding:6px 4px 8px;
+         border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  button { font:inherit; padding:4px 10px; border:1px solid var(--line); border-radius:6px;
+           background:#f6f8fa; cursor:pointer; }
+  button:hover { background:#eef1f4; }
+  button.solo.active { color:#fff; border-color:transparent; }
+  #play { min-width:78px; font-weight:600; }
+  #time { font-variant-numeric:tabular-nums; min-width:150px; }
+  .group { display:flex; gap:6px; align-items:center; }
+  .muted { color:var(--muted); }
+  #wrap { display:flex; gap:10px; align-items:flex-start; }
+  #main { position:relative; flex:1 1 auto; min-width:0; }
+  #playhead { position:absolute; width:0; border-left:1.5px solid var(--accent); pointer-events:none;
+              display:none; z-index:4; }
+  #side { flex:0 0 300px; position:sticky; top:52px; }
+  #sliceinfo { color:var(--muted); font-size:12px; padding:0 6px; }
+  #err { color:var(--accent); padding:8px; display:none; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <div class="group">
+    <button id="play" title="Play / pause (space)">▶ Play</button>
+    <button id="rewind" title="Back to start (Home)">⏮</button>
+  </div>
+  <span id="time">0.000 / 0.000 s</span>
+  <div class="group"><span class="muted" title="Exactly one track is audible; all tracks keep playing in sync.">Monitor (one at a time):</span><span id="solo" class="group" role="radiogroup"></span></div>
+  <label class="group">Vol <input type="range" id="vol" min="0" max="2" step="0.01" value="1"></label>
+  <label class="group"><input type="checkbox" id="follow" checked> follow playhead</label>
+  <span class="muted">space play/pause · 1–__N__ select track · click plot to seek · hover a spectrogram for its spectrum</span>
+</div>
+<div id="err"></div>
+<div id="wrap">
+  <div id="main"><div id="fig"></div><div id="playhead"></div></div>
+  <div id="side"><div id="slice"></div><div id="sliceinfo"></div></div>
+</div>
+<script>
+(async function () {
+  const DATA = __DATA__;
+  const err = (m) => { const e = document.getElementById("err"); e.style.display = "block"; e.textContent = m; };
+  // Streamlit's static server sends .js as text/plain (not executable via <script src>),
+  // so fetch it (browser-cached) and run it from a Blob URL.
+  try {
+    const src = await (await fetch("__PLOTLY_SRC__", { cache: "force-cache" })).text();
+    await new Promise((ok, bad) => {
+      const s = document.createElement("script");
+      s.src = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+      s.onload = ok; s.onerror = bad; document.head.appendChild(s);
+    });
+  } catch (e) { /* reported below */ }
+  if (typeof Plotly === "undefined") { err("Plotly.js failed to load from __PLOTLY_SRC__"); return; }
+
+  const b64ToBytes = (b64) => { const s = atob(b64); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
+
+  // ---- Figure: decode base64 float32 heatmaps into row views ----------------------------
+  const fig = DATA.figure;
+  const specs = [];
+  for (const tr of fig.data) {
+    if (tr.z && tr.z.__f32__) {
+      const f = new Float32Array(b64ToBytes(tr.z.__f32__).buffer);
+      const [r, c] = tr.z.shape; const rows = new Array(r);
+      for (let i = 0; i < r; i++) rows[i] = f.subarray(i * c, (i + 1) * c);
+      tr.z = rows;
+      if (tr.meta && tr.meta.kind === "spec") specs.push({ tr, rows, x: tr.x, cols: c });
+    }
+  }
+  const gd = document.getElementById("fig");
+  fig.layout.autosize = true; delete fig.layout.width;
+  await Plotly.newPlot(gd, fig.data, fig.layout,
+    { responsive: true, displaylogo: false, scrollZoom: false,
+      modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] });
+
+  // ---- Spectrum slice side panel --------------------------------------------------------
+  const sliceDiv = document.getElementById("slice");
+  const sliceInfo = document.getElementById("sliceinfo");
+  const nearest = (arr, v) => { let lo = 0, hi = arr.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arr[m] < v) lo = m; else hi = m; }
+    return Math.abs(arr[lo] - v) <= Math.abs(arr[hi] - v) ? lo : hi; };
+  const sliceLayout = {
+    template: fig.layout.template, height: 340, margin: { l: 48, r: 8, t: 30, b: 40 },
+    title: { text: "Spectrum at t", font: { size: 12 } },
+    xaxis: { title: "Hz", type: DATA.scale === "linear" ? "linear" : "log" },
+    yaxis: { title: "dB", range: DATA.db_range },
+    legend: { orientation: "h", y: -0.25, font: { size: 11 } }, showlegend: true,
+  };
+  function drawSlice(t) {
+    if (!specs.length) return;
+    const traces = specs.map((s) => {
+      const j = nearest(s.x, t);
+      return { x: s.tr.meta.freqs_hz, y: s.rows.map((row) => row[j]), mode: "lines",
+               name: s.tr.meta.slot + ". " + s.tr.meta.role,
+               line: { color: s.tr.meta.color, width: 1.4 },
+               hovertemplate: "%{x:.0f} Hz<br>%{y:.1f} dB<extra>" + s.tr.meta.role + "</extra>" };
+    });
+    sliceLayout.title.text = "Spectrum at t = " + t.toFixed(3) + " s";
+    Plotly.react(sliceDiv, traces, sliceLayout, { displaylogo: false, responsive: true });
+  }
+
+  // ---- Audio (Web Audio, one gain per track, sample-synchronous solo) --------------------
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  const master = ctx.createGain(); master.connect(ctx.destination);
+  let buffers;
+  try {
+    buffers = await Promise.all(DATA.tracks.map((t) => ctx.decodeAudioData(b64ToBytes(t.b64).buffer)));
+  } catch (e) { err("Audio decode failed: " + e); return; }
+  const gains = buffers.map(() => { const g = ctx.createGain(); g.connect(master); return g; });
+  const dur = DATA.duration;
+  let playing = false, offset = 0, t0 = 0, sources = [], solo = 0;
+
+  const now = () => playing ? Math.min(Math.max(offset, offset + ctx.currentTime - t0), dur) : offset;
+  function stopSources() { sources.forEach((s) => { try { s.stop(); } catch (_) {} s.disconnect(); }); sources = []; }
+  function start() {
+    ctx.resume();
+    stopSources();
+    if (offset >= dur - 1e-3) offset = 0;
+    sources = buffers.map((b, i) => { const s = ctx.createBufferSource(); s.buffer = b; s.connect(gains[i]); return s; });
+    const when = ctx.currentTime + 0.03;
+    sources.forEach((s) => s.start(when, offset));
+    t0 = when; playing = true; updateUi(); tick();
+  }
+  function pause() { offset = now(); stopSources(); playing = false; updateUi(); }
+  function seek(t) {
+    offset = Math.min(Math.max(t, 0), dur);
+    if (playing) start(); else { place(offset); drawSlice(offset); updateUi(); }
+  }
+  function setSolo(i) {
+    solo = i;
+    gains.forEach((g, j) => g.gain.setTargetAtTime(j === i ? 1 : 0, ctx.currentTime, 0.004));
+    document.querySelectorAll("button.solo").forEach((b, j) => {
+      b.classList.toggle("active", j === i);
+      b.setAttribute("aria-checked", j === i ? "true" : "false");
+      b.style.background = j === i ? DATA.tracks[j].color : "";
+    });
+  }
+
+  // ---- UI wiring --------------------------------------------------------------------------
+  const playBtn = document.getElementById("play");
+  const timeEl = document.getElementById("time");
+  const follow = document.getElementById("follow");
+  const soloBox = document.getElementById("solo");
+  DATA.tracks.forEach((t, i) => {
+    const b = document.createElement("button");
+    b.className = "solo"; b.textContent = (i + 1) + " " + t.role;
+    b.setAttribute("role", "radio");
+    b.title = t.name + "  (key " + (i + 1) + ")";
+    b.onclick = () => setSolo(i);
+    soloBox.appendChild(b);
+  });
+  gains.forEach((g, j) => { g.gain.value = j === 0 ? 1 : 0; });
+  setSolo(0);
+  playBtn.onclick = () => (playing ? pause() : start());
+  document.getElementById("rewind").onclick = () => seek(0);
+  document.getElementById("vol").oninput = (e) => { master.gain.value = +e.target.value; };
+  function updateUi() {
+    playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+    timeEl.textContent = now().toFixed(3) + " / " + dur.toFixed(3) + " s";
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "Space") { e.preventDefault(); playing ? pause() : start(); }
+    else if (e.key === "Home") seek(0);
+    else if (/^[1-9]$/.test(e.key) && +e.key <= DATA.tracks.length) setSolo(+e.key - 1);
+  });
+
+  // ---- Playhead overlay (DOM line; cheaper than relayout on every frame) ------------------
+  const ph = document.getElementById("playhead");
+  function place(t) {
+    const fl = gd._fullLayout; if (!fl) return;
+    const xa = fl.xaxis; const [r0, r1] = xa.range;
+    if (t < r0 || t > r1) { ph.style.display = "none"; return; }
+    ph.style.display = "block";
+    ph.style.left = (xa._offset + xa.l2p(t)) + "px";
+    ph.style.top = fl._size.t + "px";
+    ph.style.height = fl._size.h + "px";
+  }
+  let lastSlice = 0, following = false;
+  function tick() {
+    const t = now();
+    place(t);
+    timeEl.textContent = t.toFixed(3) + " / " + dur.toFixed(3) + " s";
+    const ts = performance.now();
+    if (ts - lastSlice > 100) { drawSlice(t); lastSlice = ts; }
+    if (follow.checked && !following) {
+      const [r0, r1] = gd._fullLayout.xaxis.range; const w = r1 - r0;
+      if (w < dur * 0.98 && (t > r1 || t < r0)) {
+        following = true;
+        Plotly.relayout(gd, { "xaxis.range": [t, t + w] }).then(() => { following = false; });
+      }
+    }
+    if (playing && t >= dur) { pause(); offset = dur; updateUi(); return; }
+    if (playing) requestAnimationFrame(tick);
+  }
+  gd.on("plotly_click", (ev) => { if (ev.points && ev.points.length) seek(+ev.points[0].x); });
+  gd.on("plotly_hover", (ev) => {
+    if (playing || !ev.points || !ev.points.length) return;
+    const p = ev.points[0];
+    if (p.data.meta && (p.data.meta.kind === "spec" || p.data.meta.kind === "diff")) drawSlice(+p.x);
+  });
+  gd.on("plotly_relayout", () => place(now()));
+  window.addEventListener("resize", () => place(now()));
+  place(0); drawSlice(0);
+  sliceInfo.textContent = "Follows the playhead while playing; follows the mouse over a spectrogram while paused.";
+})();
+</script>
+</body>
+</html>
