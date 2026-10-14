@@ -49,36 +49,34 @@ Resample or trim the files before loading them.
 
 ## Using it
 
-- **Slots:** each row has a role dropdown and ↑/↓ buttons. The display order is up to you.
-  Metrics and difference views follow the *role*, not the position. If a role is assigned
-  twice, those views are disabled.
-- **Transport:**
-  - Play/pause with the button or `space`; `Home` rewinds.
-  - Click any plot to seek.
-  - The **Monitor** buttons (keys `1`–`3`) are exclusive: selecting one mutes the
-    previous one. All tracks keep running sample-synchronously, so switching never
-    interrupts playback or moves the playhead.
-  - **Follow playhead** pages the view while you are zoomed in.
-- **Zoom:** drag on any panel. The time axes are linked, and double-click resets.
-- **Spectrum at t** (right panel): the spectra of all three tracks at the playhead,
-  overlaid. While paused, it follows the mouse over the spectrograms instead.
-- **Difference spectrograms:** both inputs are floored at the colour-range minimum.
-  - `processed − clean`: red means residual noise or artefacts; blue means speech energy
-    that was removed (over-suppression).
-  - `processed − noisy`: shows what the processor took away.
-- **Sidebar:** FFT size, hop, window, linear/log/mel axis, dB colour range and colormap.
+The screen has three areas: the stacked spectrograms on the left, a numbers panel on the right, and a transport bar below the spectrograms.
 
-### Tabs
+- **Spectrograms:** one panel per track, with the waveform overlaid as in iZotope RX.
+  - Drag on any panel to zoom; the panels zoom together.
+  - Click a panel to seek.
+  - Click a panel's label to listen to that track.
+- **Transport bar:**
+  - Play/pause (`space`) and rewind (`Home`).
+  - **Listen to**: an exclusive switch (keys `1`–`3`). All tracks keep playing in sync; only the selected one is audible.
+  - Volume.
+  - Zoom −/fit/+ (keys `-` `0` `+`) and *follow*.
+- **Numbers panel:**
+  - **Cursor:** time, frequency and level under the mouse.
+  - **Quality vs clean:** Separation (SI-SDR), Quality (PESQ) and Intelligibility (STOI) for noisy and processed, with a ▲/▼ change badge.
+  - **Levels per track:** peak, RMS, max RMS, noise floor (how quiet the pauses are), clipped samples and DC offset.
+- **Header menus:**
+  - **Tracks:** display order and role assignment. Scores follow the roles, not the order.
+  - **⚙ Display:** frequency scale, time/pitch detail, contrast, colours, waveform overlay, an optional spectrum-at-playhead card, and advanced STFT settings.
+  - Dataset settings are in the collapsed sidebar (`>` at the top left).
+- **Analysis & export** (collapsed drawer below the main view):
 
 | Tab | Contents |
 |---|---|
-| Metrics | SNR, SI-SDR, PESQ and STOI for noisy→clean and processed→clean, plus the Δ between them |
-| Long-term spectrum | Welch PSD overlay of the three files |
-| Level envelope | 20 ms RMS in dBFS; reveals gating, pumping and level loss |
-| Signal stats | Peak and RMS dBFS, crest factor, clipped samples, DC offset |
-| Export | Stacked figure as PNG/SVG, metrics CSV for this triplet, and batch metrics CSV over the whole folder |
-
-Exported files are also written to `./exports` on the host.
+| Differences | `processed − clean` and `processed − noisy` in dB. Red means more energy (residual noise or artefacts); blue means less (removed speech) |
+| Long-term spectrum | Average spectrum of each file |
+| Loudness over time | 20 ms RMS; reveals gating and pumping |
+| All metrics | Full table, including SNR, with notes |
+| Export | Stacked figure as PNG/SVG, metrics CSV for this triplet, and batch CSV over the whole folder. Files are also written to `./exports` |
 
 ### Metric notes
 

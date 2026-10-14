@@ -10,12 +10,26 @@ from plotly.subplots import make_subplots
 
 from . import dsp
 
-# Colour-blind-safe (ColorBrewer Dark2) colours, fixed per role everywhere in the app.
-ROLE_COLORS = {"clean": "#1b9e77", "noisy": "#d95f02", "processed": "#7570b3"}
-SPEC_COLORMAPS = ("Magma", "Viridis", "Inferno", "Cividis", "Greys")
-TEMPLATE = "plotly_white"
+# Dark, RX-like palette shared with .streamlit/config.toml and the player.
+BG = "#14161b"
+PLOT_BG = "#05060a"
+FG = "#d6d9df"
+MUTED = "#8a919e"
+GRID = "rgba(255,255,255,0.06)"
+ACCENT = "#f39c12"
+WAVE_COLOR = "77,163,255"  # RGB of #4da3ff; alpha comes from the opacity setting
 
-WAVE_PX, SPEC_PX, DIFF_PX = 90, 220, 190
+# Distinguishable on a dark background; used for the line charts and the stats panel.
+ROLE_COLORS = {"clean": "#4fd1a5", "noisy": "#f5a142", "processed": "#a495ff"}
+
+EMBER = [  # black → deep blue → rust → orange → amber → near-white, approximating RX
+    [0.00, "#030409"], [0.18, "#0d1838"], [0.38, "#4a1f3a"], [0.55, "#a8401c"],
+    [0.72, "#e8811f"], [0.88, "#f9c74f"], [1.00, "#fff6d8"],
+]
+SPEC_COLORMAPS = {"Ember": EMBER, "Magma": "Magma", "Viridis": "Viridis", "Greys": "Greys"}
+
+TRACK_PX, DIFF_PX, GAP_PX = 230, 200, 8
+MARGIN = dict(l=52, r=58, t=6, b=34)
 MEL_TICKS_HZ = (100, 200, 500, 1000, 2000, 4000, 8000, 16000)
 
 
@@ -36,97 +50,127 @@ class DiffView:
     spec: dsp.Spectrogram  # for the time/frequency axes
 
 
+def _dark(fig: go.Figure, height: int) -> None:
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor=BG, plot_bgcolor=PLOT_BG, height=height,
+        margin=MARGIN, font=dict(color=MUTED, size=11), hovermode="closest", dragmode="zoom",
+        showlegend=False,
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False, showline=False, ticks="", showticklabels=False)
+    fig.update_yaxes(showgrid=False, zeroline=False, showline=False, ticks="")
+
+
 def _freq_axis(fig, row, spec: dsp.Spectrogram, sr: int):
-    title = "Hz"
+    # secondary_y=False: never touch the hidden waveform axis that overlays this panel.
+    kw = dict(row=row, col=1, secondary_y=False, tickfont=dict(size=10), tickformat="~s", nticks=6)
     if spec.scale == "log":
-        fig.update_yaxes(type="log", row=row, col=1)
+        fig.update_yaxes(type="log", **kw)
     elif spec.scale == "mel":
         ticks = [f for f in MEL_TICKS_HZ if f < sr / 2]
+        kw.pop("tickformat"), kw.pop("nticks")
         fig.update_yaxes(tickvals=list(dsp.hz_to_mel(ticks)),
-                         ticktext=[f"{f/1000:g}k" if f >= 1000 else str(f) for f in ticks],
-                         row=row, col=1)
-        title = "Hz (mel)"
-    fig.update_yaxes(title_text=title, title_standoff=4, row=row, col=1)
+                         ticktext=[f"{f/1000:g}k" if f >= 1000 else str(f) for f in ticks], **kw)
+    else:
+        fig.update_yaxes(**kw)
 
 
 def _spec_y(spec: dsp.Spectrogram) -> np.ndarray:
     return dsp.hz_to_mel(spec.freqs) if spec.scale == "mel" else spec.freqs
 
 
+def _time_axis(fig, row: int):
+    fig.update_xaxes(showticklabels=True, ticks="outside", ticklen=4, tickcolor=MUTED, ticksuffix=" s",
+                     tickfont=dict(size=10), row=row, col=1)
+
+
+def _label(fig, row: int, text: str, name: str, active: bool = False):
+    yref = fig.get_subplot(row, 1).yaxis.plotly_name.replace("axis", "")
+    fig.add_annotation(
+        text=text, name=name, xref="paper", yref=f"{yref} domain", x=0.004, y=0.97,
+        xanchor="left", yanchor="top", showarrow=False, captureevents=True,
+        font=dict(size=11, color="#111" if active else FG),
+        bgcolor=ACCENT if active else "rgba(10,12,16,0.72)", borderpad=4,
+    )
+
+
+def track_label(t: TrackView, monitored: bool) -> str:
+    return f"{'🎧 ' if monitored else ''}<b>{t.role.upper()}</b> · {t.name}"
+
+
 def stacked_figure(
     tracks: list[TrackView],
-    diffs: list[DiffView],
     db_range: tuple[float, float],
-    colormap: str = "Magma",
-    diff_range: float = 20.0,
+    colormap: str = "Ember",
+    wave_opacity: float = 0.55,
     shared_amplitude: bool = True,
+    monitored_slot: int = 1,
 ) -> go.Figure:
-    rows, heights, titles = [], [], []
-    for t in tracks:
-        rows += [("wave", t), ("spec", t)]
-        heights += [WAVE_PX, SPEC_PX]
-        titles += [f"<b>{t.slot}. {t.role.upper()}</b> — {t.name}", ""]
-    for d in diffs:
-        rows.append(("diff", d))
-        heights.append(DIFF_PX)
-        titles.append(f"<b>Δ {d.label}</b> (dB)")
+    """One panel per track: spectrogram with the waveform overlaid on a hidden secondary y-axis."""
+    n = len(tracks)
+    height = n * TRACK_PX + (n - 1) * GAP_PX + MARGIN["t"] + MARGIN["b"]
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=GAP_PX / height,
+                        specs=[[{"secondary_y": True}]] * n)
+    amp = max(max(float(np.max(np.abs(t.x))) for t in tracks), 1e-3) * 1.05
 
-    total = sum(heights)
-    fig = make_subplots(
-        rows=len(rows), cols=1, shared_xaxes=True, vertical_spacing=28 / total,
-        row_heights=[h / total for h in heights], subplot_titles=titles,
-    )
-    amp = max(float(np.max(np.abs(t.x))) for t in tracks) if tracks else 1.0
-    amp = max(amp, 1e-3) * 1.05
+    for i, t in enumerate(tracks, start=1):
+        s = t.spec
+        fig.add_trace(go.Heatmap(
+            x=s.times, y=_spec_y(s), z=s.db, coloraxis="coloraxis",
+            hovertemplate="%{x:.3f} s · %{y:.0f} " + ("mel" if s.scale == "mel" else "Hz")
+            + " · %{z:.1f} dB<extra>" + t.role + "</extra>",
+            meta={"kind": "spec", "slot": t.slot, "role": t.role},
+        ), row=i, col=1, secondary_y=False)
+        _freq_axis(fig, i, s, t.sr)
 
-    for i, (kind, obj) in enumerate(rows, start=1):
-        if kind == "wave":
-            tx, y = dsp.waveform_envelope(obj.x, obj.sr)
+        if wave_opacity > 0:
+            tx, y = dsp.waveform_envelope(t.x, t.sr)
+            a = amp if shared_amplitude else max(float(np.max(np.abs(t.x))), 1e-3) * 1.05
             fig.add_trace(go.Scatter(
-                x=tx, y=y, mode="lines", line=dict(width=0.7, color=ROLE_COLORS.get(obj.role, "#444")),
-                name=obj.role, showlegend=False,
-                hovertemplate="t=%{x:.3f} s<br>amp=%{y:.4f}<extra>" + obj.role + "</extra>",
-                meta={"kind": "wave", "slot": obj.slot, "role": obj.role},
-            ), row=i, col=1)
-            a = amp if shared_amplitude else max(float(np.max(np.abs(obj.x))), 1e-3) * 1.05
-            fig.update_yaxes(range=[-a, a], title_text="amp", title_standoff=4, zeroline=True, row=i, col=1)
-        elif kind == "spec":
-            s = obj.spec
-            unit = "mel" if s.scale == "mel" else "Hz"
-            fig.add_trace(go.Heatmap(
-                x=s.times, y=_spec_y(s), z=s.db, coloraxis="coloraxis",
-                hovertemplate="t=%{x:.3f} s<br>f=%{y:.0f} " + unit + "<br>%{z:.1f} dB<extra>"
-                + obj.role + "</extra>",
-                meta={"kind": "spec", "slot": obj.slot, "role": obj.role},
-            ), row=i, col=1)
-            _freq_axis(fig, i, s, obj.sr)
-        else:
-            s = obj.spec
-            unit = "mel" if s.scale == "mel" else "Hz"
-            fig.add_trace(go.Heatmap(
-                x=s.times, y=_spec_y(s), z=obj.db, coloraxis="coloraxis2",
-                hovertemplate="t=%{x:.3f} s<br>f=%{y:.0f} " + unit + "<br>Δ %{z:+.1f} dB<extra>"
-                + obj.label + "</extra>",
-                meta={"kind": "diff", "label": obj.label},
-            ), row=i, col=1)
-            _freq_axis(fig, i, s, tracks[0].sr if tracks else 16000)
+                x=tx, y=y, mode="lines", hoverinfo="skip",
+                line=dict(width=0.8, color=f"rgba({WAVE_COLOR},{wave_opacity})"),
+                meta={"kind": "wave", "slot": t.slot, "role": t.role},
+            ), row=i, col=1, secondary_y=True)
+            fig.update_yaxes(range=[-a, a], visible=False, row=i, col=1, secondary_y=True)
+        _label(fig, i, track_label(t, t.slot == monitored_slot), f"label{t.slot}", t.slot == monitored_slot)
 
-    spec_frac = (len(tracks) * (WAVE_PX + SPEC_PX)) / total
-    fig.update_layout(
-        template=TEMPLATE,
-        height=total + 90,
-        margin=dict(l=70, r=90, t=40, b=50),
-        hovermode="closest",
-        coloraxis=dict(colorscale=colormap, cmin=db_range[0], cmax=db_range[1],
-                       colorbar=dict(title="dB", len=min(0.5, spec_frac), y=1, yanchor="top", thickness=12)),
-        coloraxis2=dict(colorscale="RdBu_r", cmid=0, cmin=-diff_range, cmax=diff_range,
-                        colorbar=dict(title="Δ dB", len=max(0.15, 1 - spec_frac), y=0, yanchor="bottom",
-                                      thickness=12)),
-        dragmode="zoom",
-    )
-    fig.update_annotations(font_size=12, xanchor="left", x=0)
-    fig.update_xaxes(showticklabels=False, ticks="")
-    fig.update_xaxes(title_text="Time (s)", showticklabels=True, ticks="outside", row=len(rows), col=1)
+    _dark(fig, height)
+    _time_axis(fig, n)
+    fig.update_layout(coloraxis=dict(
+        colorscale=SPEC_COLORMAPS.get(colormap, colormap), cmin=db_range[0], cmax=db_range[1],
+        colorbar=dict(thickness=8, len=1, y=0.5, x=1.004, xpad=6, outlinewidth=0, ticksuffix=" dB",
+                      tickfont=dict(size=10, color=MUTED), nticks=6)))
+    return fig
+
+
+def difference_figure(diffs: list[DiffView], sr: int, diff_range: float = 20.0) -> go.Figure:
+    n = len(diffs)
+    height = n * DIFF_PX + (n - 1) * GAP_PX + MARGIN["t"] + MARGIN["b"]
+    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=GAP_PX / height)
+    for i, d in enumerate(diffs, start=1):
+        s = d.spec
+        fig.add_trace(go.Heatmap(
+            x=s.times, y=_spec_y(s), z=d.db, coloraxis="coloraxis",
+            hovertemplate="%{x:.3f} s · %{y:.0f} " + ("mel" if s.scale == "mel" else "Hz")
+            + " · %{z:+.1f} dB<extra>" + d.label + "</extra>",
+        ), row=i, col=1)
+        _freq_axis(fig, i, s, sr)
+        _label(fig, i, f"<b>{d.label}</b>", f"diff{i}")
+    _dark(fig, height)
+    _time_axis(fig, n)
+    fig.update_layout(coloraxis=dict(
+        colorscale="RdBu_r", cmid=0, cmin=-diff_range, cmax=diff_range,
+        colorbar=dict(thickness=8, len=1, x=1.004, xpad=6, outlinewidth=0, ticksuffix=" dB",
+                      tickfont=dict(size=10, color=MUTED))))
+    return fig
+
+
+def _line_layout(fig: go.Figure, height: int, xtitle: str, ytitle: str) -> go.Figure:
+    fig.update_layout(template="plotly_dark", paper_bgcolor=BG, plot_bgcolor=BG, height=height,
+                      margin=dict(l=60, r=20, t=30, b=50), font=dict(color=MUTED, size=11),
+                      xaxis_title=xtitle, yaxis_title=ytitle, hovermode="x unified",
+                      legend=dict(orientation="h", y=1.1))
+    fig.update_xaxes(gridcolor=GRID, zeroline=False)
+    fig.update_yaxes(gridcolor=GRID, zeroline=False)
     return fig
 
 
@@ -137,9 +181,7 @@ def ltas_figure(curves: dict[str, tuple[np.ndarray, np.ndarray]], log_freq: bool
         fig.add_trace(go.Scatter(x=f[keep], y=db[keep], name=role, mode="lines",
                                  line=dict(color=ROLE_COLORS.get(role), width=1.5),
                                  hovertemplate="%{x:.0f} Hz<br>%{y:.1f} dB/Hz<extra>" + role + "</extra>"))
-    fig.update_layout(template=TEMPLATE, height=380, margin=dict(l=60, r=20, t=30, b=50),
-                      xaxis_title="Frequency (Hz)", yaxis_title="PSD (dB/Hz)", hovermode="x unified",
-                      legend=dict(orientation="h", y=1.08))
+    _line_layout(fig, 360, "Frequency (Hz)", "Level (dB/Hz)")
     if log_freq:
         fig.update_xaxes(type="log")
     return fig
@@ -151,7 +193,4 @@ def envelope_figure(curves: dict[str, tuple[np.ndarray, np.ndarray]], floor_db: 
         fig.add_trace(go.Scatter(x=t, y=np.maximum(db, floor_db), name=role, mode="lines",
                                  line=dict(color=ROLE_COLORS.get(role), width=1.2),
                                  hovertemplate="%{x:.3f} s<br>%{y:.1f} dBFS<extra>" + role + "</extra>"))
-    fig.update_layout(template=TEMPLATE, height=320, margin=dict(l=60, r=20, t=30, b=50),
-                      xaxis_title="Time (s)", yaxis_title="RMS level (dBFS)", hovermode="x unified",
-                      legend=dict(orientation="h", y=1.1))
-    return fig
+    return _line_layout(fig, 320, "Time (s)", "Loudness (dBFS)")

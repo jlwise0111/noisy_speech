@@ -137,11 +137,15 @@ def signal_stats(x: np.ndarray, sr: int, clip_threshold: float = 0.999) -> dict:
     x64 = x.astype(np.float64)
     peak = float(np.max(np.abs(x64))) if x64.size else 0.0
     rms = float(np.sqrt(np.mean(x64**2))) if x64.size else 0.0
+    _, env_db = rms_envelope(x, sr)
     return {
         "duration_s": len(x) / sr,
         "sample_rate_hz": sr,
         "peak_dbfs": 20 * np.log10(peak + EPS),
         "rms_dbfs": 20 * np.log10(rms + EPS),
+        "max_rms_dbfs": float(np.max(env_db)),
+        # Level of the quietest 10% of 20 ms windows: a plain proxy for "how quiet are the pauses".
+        "noise_floor_dbfs": float(np.percentile(env_db, 10)),
         "crest_factor_db": 20 * np.log10((peak + EPS) / (rms + EPS)),
         "clipped_samples": int(np.sum(np.abs(x64) >= clip_threshold)),
         "dc_offset": float(np.mean(x64)) if x64.size else 0.0,

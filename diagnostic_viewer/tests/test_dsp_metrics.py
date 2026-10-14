@@ -75,3 +75,17 @@ def test_waveform_envelope_keeps_extremes():
     x = speech_like(SR, 10.0)
     t, y = dsp.waveform_envelope(x, SR, max_points=2000)
     assert y.size <= 2000 and y.max() == x.max() and y.min() == x.min()
+
+
+def test_noise_floor_tracks_pauses():
+    from viewer.metrics import scorecard
+
+    clean, noisy, processed = make_triplet(SR, 4.0, snr_db=0.0)
+    st = {k: dsp.signal_stats(x, SR) for k, x in (("clean", clean), ("noisy", noisy), ("proc", processed))}
+    for s in st.values():
+        assert s["noise_floor_dbfs"] <= s["rms_dbfs"] <= s["max_rms_dbfs"]
+    # Denoising should lower the level of the pauses by roughly the 15 dB applied to the noise.
+    assert st["noisy"]["noise_floor_dbfs"] - st["proc"]["noise_floor_dbfs"] > 10
+    card = scorecard(compute_all(clean, noisy, processed, SR))
+    assert [c["label"] for c in card] == ["Separation", "Quality", "Intelligibility"]
+    assert all(c["delta"] > 0 for c in card)

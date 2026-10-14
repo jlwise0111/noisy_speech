@@ -3,49 +3,95 @@
 <head>
 <meta charset="utf-8">
 <style>
-  :root { --fg:#1f2328; --muted:#656d76; --line:#d0d7de; --bg:#ffffff; --accent:#d1242f; }
+  :root { --bg:#14161b; --panel:#1b1e25; --card:#20242c; --line:#2c313b; --fg:#d6d9df; --muted:#8a919e;
+          --accent:#f39c12; --good:#3ecf8e; --bad:#ff6b6b; --plot:#05060a; }
+  * { box-sizing:border-box; }
   html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
-               font:13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  #bar { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; padding:6px 4px 8px;
-         border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
-  button { font:inherit; padding:4px 10px; border:1px solid var(--line); border-radius:6px;
-           background:#f6f8fa; cursor:pointer; }
-  button:hover { background:#eef1f4; }
-  button.solo.active { color:#fff; border-color:transparent; }
-  #play { min-width:78px; font-weight:600; }
-  #time { font-variant-numeric:tabular-nums; min-width:150px; }
-  .group { display:flex; gap:6px; align-items:center; }
+               font:13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
+  #app { display:grid; grid-template-columns:minmax(0,1fr) 300px; grid-template-rows:auto auto; gap:10px; }
+  #main { grid-column:1; grid-row:1; position:relative; border-radius:6px; overflow:hidden; }
+  #panel { grid-column:2; grid-row:1 / span 2; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+  #transport { grid-column:1; grid-row:2; display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px;
+               background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
+  #playhead { position:absolute; width:0; border-left:1.5px solid #ffd54a; box-shadow:0 0 6px #ffd54a88;
+              pointer-events:none; display:none; z-index:4; }
+  #clock { font:600 24px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color:var(--accent);
+           letter-spacing:0.5px; min-width:178px; }
+  button { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line);
+           border-radius:5px; padding:5px 10px; cursor:pointer; }
+  button:hover { border-color:#4a5160; }
+  .icon { width:34px; padding:5px 0; text-align:center; }
+  #play { width:42px; font-size:15px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .seg button { border:0; border-radius:0; border-right:1px solid var(--line); background:var(--card); }
+  .seg button:last-child { border-right:0; }
+  .seg button.active { background:var(--accent); color:#111; font-weight:600; }
+  .grp { display:flex; align-items:center; gap:6px; }
   .muted { color:var(--muted); }
-  #wrap { display:flex; gap:10px; align-items:flex-start; }
-  #main { position:relative; flex:1 1 auto; min-width:0; }
-  #playhead { position:absolute; width:0; border-left:1.5px solid var(--accent); pointer-events:none;
-              display:none; z-index:4; }
-  #side { flex:0 0 300px; position:sticky; top:52px; }
-  #sliceinfo { color:var(--muted); font-size:12px; padding:0 6px; }
-  #err { color:var(--accent); padding:8px; display:none; white-space:pre-wrap; }
+  .small { font-size:11px; }
+  .spacer { flex:1 1 auto; }
+  input[type=range] { accent-color:var(--accent); width:90px; }
+  input[type=checkbox] { accent-color:var(--accent); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .card h4 { margin:0 0 8px; font-size:10.5px; letter-spacing:1.2px; color:var(--muted); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td, th { padding:3px 0; text-align:right; white-space:nowrap; }
+  th { font-weight:600; font-size:11px; }
+  td:first-child, th:first-child { text-align:left; color:var(--muted); font-weight:400; }
+  .val { display:inline-block; min-width:52px; padding:1px 5px; background:#11141a; border:1px solid var(--line);
+         border-radius:3px; }
+  .badge { display:inline-block; min-width:54px; padding:1px 5px; border-radius:3px; font-weight:600; }
+  .up { color:var(--good); background:#3ecf8e1c; } .down { color:var(--bad); background:#ff6b6b1c; }
+  .warn { color:var(--accent); }
+  #cursor td { padding:2px 0; }
+  #err { color:var(--bad); padding:8px; display:none; white-space:pre-wrap; }
+  [title] { cursor:help; }
 </style>
 </head>
 <body>
-<div id="bar">
-  <div class="group">
-    <button id="play" title="Play / pause (space)">▶ Play</button>
-    <button id="rewind" title="Back to start (Home)">⏮</button>
-  </div>
-  <span id="time">0.000 / 0.000 s</span>
-  <div class="group"><span class="muted" title="Exactly one track is audible; all tracks keep playing in sync.">Monitor (one at a time):</span><span id="solo" class="group" role="radiogroup"></span></div>
-  <label class="group">Vol <input type="range" id="vol" min="0" max="2" step="0.01" value="1"></label>
-  <label class="group"><input type="checkbox" id="follow" checked> follow playhead</label>
-  <span class="muted">space play/pause · 1–__N__ select track · click plot to seek · hover a spectrogram for its spectrum</span>
-</div>
 <div id="err"></div>
-<div id="wrap">
+<div id="app">
   <div id="main"><div id="fig"></div><div id="playhead"></div></div>
-  <div id="side"><div id="slice"></div><div id="sliceinfo"></div></div>
+
+  <div id="transport">
+    <span id="clock">00:00:00.000</span>
+    <div class="grp">
+      <button id="rewind" class="icon" title="Back to start (Home)">⏮</button>
+      <button id="play" class="icon" title="Play / pause (space)">▶</button>
+    </div>
+    <div class="grp"><span class="muted small">Listen to</span><div id="solo" class="seg" role="radiogroup"></div></div>
+    <label class="grp muted small">Vol <input type="range" id="vol" min="0" max="2" step="0.01" value="1"></label>
+    <span class="spacer"></span>
+    <div class="grp">
+      <button class="icon" id="zout" title="Zoom out (−)">−</button>
+      <button id="zfit" title="Show whole file (0)">fit</button>
+      <button class="icon" id="zin" title="Zoom in (+)">+</button>
+      <label class="grp muted small" title="Scroll the view to keep the playhead visible"><input type="checkbox" id="follow" checked> follow</label>
+    </div>
+    <span id="fmt" class="muted small" style="flex-basis:100%"></span>
+  </div>
+
+  <div id="panel">
+    <div class="card">
+      <h4>CURSOR</h4>
+      <table id="cursor">
+        <tr><td>Time</td><td id="c_t">—</td></tr>
+        <tr><td>Frequency</td><td id="c_f">—</td></tr>
+        <tr><td>Level</td><td id="c_db">—</td></tr>
+        <tr><td>Track</td><td id="c_tr">—</td></tr>
+      </table>
+    </div>
+    <div class="card"><h4>QUALITY <span class="small" style="letter-spacing:0">vs clean</span></h4><div id="quality"></div></div>
+    <div class="card"><h4>LEVELS</h4><div id="levels"></div></div>
+    <div class="card" id="slicecard" style="display:none"><h4>SPECTRUM AT PLAYHEAD</h4><div id="slice"></div></div>
+  </div>
 </div>
 <script>
 (async function () {
   const DATA = __DATA__;
-  const err = (m) => { const e = document.getElementById("err"); e.style.display = "block"; e.textContent = m; };
+  const $ = (id) => document.getElementById(id);
+  const err = (m) => { $("err").style.display = "block"; $("err").textContent = m; };
+
   // Streamlit's static server sends .js as text/plain (not executable via <script src>),
   // so fetch it (browser-cached) and run it from a Blob URL.
   try {
@@ -60,6 +106,12 @@
 
   const b64ToBytes = (b64) => { const s = atob(b64); const u = new Uint8Array(s.length);
     for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
+  const fmtNum = (v, d, unit = "") => (v === null || v === undefined || Number.isNaN(v)) ? "N/A"
+    : (v === -Infinity ? "−inf" : v.toFixed(d).replace("-", "−") + unit);
+  const fmtClock = (t) => { const ms = Math.round(t * 1000); const h = Math.floor(ms / 3600000);
+    const m = Math.floor(ms / 60000) % 60; const s = Math.floor(ms / 1000) % 60;
+    const p = (n, w = 2) => String(n).padStart(w, "0"); return `${p(h)}:${p(m)}:${p(s)}.${p(ms % 1000, 3)}`; };
+  const fmtHz = (f) => f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : f.toFixed(0) + " Hz";
 
   // ---- Figure: decode base64 float32 heatmaps into row views ----------------------------
   const fig = DATA.figure;
@@ -70,42 +122,88 @@
       const [r, c] = tr.z.shape; const rows = new Array(r);
       for (let i = 0; i < r; i++) rows[i] = f.subarray(i * c, (i + 1) * c);
       tr.z = rows;
-      if (tr.meta && tr.meta.kind === "spec") specs.push({ tr, rows, x: tr.x, cols: c });
+      if (tr.meta && tr.meta.kind === "spec") {
+        // Readout goes to the Cursor card instead of a floating tooltip.
+        tr.hoverinfo = "none"; delete tr.hovertemplate; specs.push({ tr, rows, x: tr.x }); }
     }
   }
-  const gd = document.getElementById("fig");
+  const gd = $("fig");
   fig.layout.autosize = true; delete fig.layout.width;
   await Plotly.newPlot(gd, fig.data, fig.layout,
-    { responsive: true, displaylogo: false, scrollZoom: false,
-      modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] });
+    { responsive: true, displaylogo: false, scrollZoom: false, displayModeBar: "hover",
+      modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toImage"] });
 
-  // ---- Spectrum slice side panel --------------------------------------------------------
-  const sliceDiv = document.getElementById("slice");
-  const sliceInfo = document.getElementById("sliceinfo");
+  // ---- Right panel: quality scorecard + level stats --------------------------------------
+  function renderQuality() {
+    const q = DATA.scorecard;
+    if (!q) { $("quality").innerHTML = '<span class="muted">Assign each role once (Tracks menu) to score.</span>'; return; }
+    let h = '<table><tr><th></th><th>Noisy</th><th>Processed</th><th>Change</th></tr>';
+    for (const r of q) {
+      const cls = r.delta === null ? "" : (r.delta >= 0 ? "up" : "down");
+      const arrow = r.delta === null ? "" : (r.delta >= 0 ? "▲ " : "▼ ");
+      h += `<tr title="${r.tooltip}"><td>${r.label}</td><td>${fmtNum(r.noisy, r.decimals)}</td>`
+         + `<td><span class="val">${fmtNum(r.processed, r.decimals)}</span></td>`
+         + `<td><span class="badge ${cls}">${arrow}${fmtNum(Math.abs(r.delta ?? NaN), r.decimals)}</span></td></tr>`;
+    }
+    $("quality").innerHTML = h + "</table>";
+  }
+  function renderLevels() {
+    const st = DATA.stats;
+    const lvl = (v) => (v < -150 ? '<span class="muted">silent</span>' : fmtNum(v, 1, " dB"));
+    const SHORT = { clean: "Clean", noisy: "Noisy", processed: "Proc." };
+    const rows = [
+      ["Peak", "peak_dbfs", lvl, "Highest sample level (dBFS)"],
+      ["RMS", "rms_dbfs", lvl, "Average loudness over the whole file (dBFS)"],
+      ["Max RMS", "max_rms_dbfs", lvl, "Loudest 20 ms moment (dBFS)"],
+      ["Noise floor", "noise_floor_dbfs", lvl,
+        "Level of the quietest 10% of 20 ms windows: how quiet the pauses are"],
+      ["Clipped", "clipped_samples", (v) => (v > 0 ? `<span class="warn">${v}</span>` : "0"),
+        "Samples at or above full scale"],
+      ["DC offset", "dc_offset", (v) => fmtNum(v * 100, 3, "%"), "Mean sample value"],
+    ];
+    let h = "<table><tr><th></th>" + st.map((s) =>
+      `<th style="color:${s.color}" title="${s.name}">${SHORT[s.role] || s.role}</th>`).join("") + "</tr>";
+    for (const [label, key, f, tip] of rows)
+      h += `<tr title="${tip}"><td>${label}</td>` + st.map((s) => `<td>${f(s[key])}</td>`).join("") + "</tr>";
+    $("levels").innerHTML = h + "</table>";
+  }
+  renderQuality(); renderLevels();
+  $("fmt").textContent = DATA.format_line;
+
+  // ---- Cursor readout (hover) -------------------------------------------------------------
+  gd.on("plotly_hover", (ev) => {
+    const p = ev.points && ev.points.find((q) => q.data.meta && q.data.meta.kind === "spec");
+    if (!p) return;
+    const row = Array.isArray(p.pointNumber) ? p.pointNumber[0] : p.pointIndex[0];
+    const hz = p.data.meta.freqs_hz ? p.data.meta.freqs_hz[row] : +p.y;
+    $("c_t").textContent = (+p.x).toFixed(3) + " s";
+    $("c_f").textContent = fmtHz(hz);
+    $("c_db").textContent = fmtNum(+p.z, 1, " dB");
+    $("c_tr").innerHTML = `<span style="color:${p.data.meta.color}">${p.data.meta.role}</span>`;
+    if (!playing && DATA.show_slice) drawSlice(+p.x);
+  });
+
+  // ---- Optional spectrum-at-playhead card --------------------------------------------------
+  const sliceDiv = $("slice");
   const nearest = (arr, v) => { let lo = 0, hi = arr.length - 1;
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arr[m] < v) lo = m; else hi = m; }
     return Math.abs(arr[lo] - v) <= Math.abs(arr[hi] - v) ? lo : hi; };
   const sliceLayout = {
-    template: fig.layout.template, height: 340, margin: { l: 48, r: 8, t: 30, b: 40 },
-    title: { text: "Spectrum at t", font: { size: 12 } },
-    xaxis: { title: "Hz", type: DATA.scale === "linear" ? "linear" : "log" },
-    yaxis: { title: "dB", range: DATA.db_range },
-    legend: { orientation: "h", y: -0.25, font: { size: 11 } }, showlegend: true,
+    template: fig.layout.template, paper_bgcolor: "#1b1e25", plot_bgcolor: "#1b1e25", height: 220,
+    margin: { l: 40, r: 6, t: 6, b: 30 }, font: { color: "#8a919e", size: 10 }, showlegend: false,
+    xaxis: { type: DATA.scale === "linear" ? "linear" : "log", tickformat: "~s", gridcolor: "#2c313b" },
+    yaxis: { range: DATA.db_range, gridcolor: "#2c313b" },
   };
   function drawSlice(t) {
-    if (!specs.length) return;
-    const traces = specs.map((s) => {
-      const j = nearest(s.x, t);
-      return { x: s.tr.meta.freqs_hz, y: s.rows.map((row) => row[j]), mode: "lines",
-               name: s.tr.meta.slot + ". " + s.tr.meta.role,
-               line: { color: s.tr.meta.color, width: 1.4 },
-               hovertemplate: "%{x:.0f} Hz<br>%{y:.1f} dB<extra>" + s.tr.meta.role + "</extra>" };
-    });
-    sliceLayout.title.text = "Spectrum at t = " + t.toFixed(3) + " s";
-    Plotly.react(sliceDiv, traces, sliceLayout, { displaylogo: false, responsive: true });
+    if (!DATA.show_slice || !specs.length) return;
+    const traces = specs.map((s) => { const j = nearest(s.x, t);
+      return { x: s.tr.meta.freqs_hz, y: s.rows.map((row) => row[j]), mode: "lines", name: s.tr.meta.role,
+               line: { color: s.tr.meta.color, width: 1.2 }, hovertemplate: "%{x:.0f} Hz · %{y:.1f} dB<extra>%{fullData.name}</extra>" }; });
+    Plotly.react(sliceDiv, traces, sliceLayout, { displayModeBar: false, responsive: true });
   }
+  if (DATA.show_slice) { $("slicecard").style.display = "block"; }
 
-  // ---- Audio (Web Audio, one gain per track, sample-synchronous solo) --------------------
+  // ---- Audio (Web Audio, one gain per track, exclusive monitor) ------------------------------
   const AC = window.AudioContext || window.webkitAudioContext;
   const ctx = new AC();
   const master = ctx.createGain(); master.connect(ctx.destination);
@@ -133,47 +231,71 @@
     offset = Math.min(Math.max(t, 0), dur);
     if (playing) start(); else { place(offset); drawSlice(offset); updateUi(); }
   }
+
+  // Monitor label chips inside the plot (annotations named label<slot>).
+  const labelIdx = DATA.tracks.map((t) => (fig.layout.annotations || []).findIndex((a) => a.name === "label" + t.slot));
   function setSolo(i) {
     solo = i;
     gains.forEach((g, j) => g.gain.setTargetAtTime(j === i ? 1 : 0, ctx.currentTime, 0.004));
-    document.querySelectorAll("button.solo").forEach((b, j) => {
-      b.classList.toggle("active", j === i);
-      b.setAttribute("aria-checked", j === i ? "true" : "false");
-      b.style.background = j === i ? DATA.tracks[j].color : "";
+    document.querySelectorAll("#solo button").forEach((b, j) => {
+      b.classList.toggle("active", j === i); b.setAttribute("aria-checked", j === i ? "true" : "false"); });
+    const upd = {};
+    DATA.tracks.forEach((t, j) => {
+      const k = labelIdx[j]; if (k < 0) return;
+      upd[`annotations[${k}].text`] = (j === i ? "🎧 " : "") + `<b>${t.role.toUpperCase()}</b> · ${t.name}`;
+      upd[`annotations[${k}].bgcolor`] = j === i ? "#f39c12" : "rgba(10,12,16,0.72)";
+      upd[`annotations[${k}].font.color`] = j === i ? "#111" : "#d6d9df";
     });
+    Plotly.relayout(gd, upd);
   }
 
-  // ---- UI wiring --------------------------------------------------------------------------
-  const playBtn = document.getElementById("play");
-  const timeEl = document.getElementById("time");
-  const follow = document.getElementById("follow");
-  const soloBox = document.getElementById("solo");
+  // ---- Transport wiring ---------------------------------------------------------------------
   DATA.tracks.forEach((t, i) => {
     const b = document.createElement("button");
-    b.className = "solo"; b.textContent = (i + 1) + " " + t.role;
-    b.setAttribute("role", "radio");
-    b.title = t.name + "  (key " + (i + 1) + ")";
+    b.textContent = t.role; b.setAttribute("role", "radio");
+    b.title = `${t.name} (key ${i + 1}). Only one track is audible; all keep playing in sync.`;
     b.onclick = () => setSolo(i);
-    soloBox.appendChild(b);
+    $("solo").appendChild(b);
   });
   gains.forEach((g, j) => { g.gain.value = j === 0 ? 1 : 0; });
   setSolo(0);
-  playBtn.onclick = () => (playing ? pause() : start());
-  document.getElementById("rewind").onclick = () => seek(0);
-  document.getElementById("vol").oninput = (e) => { master.gain.value = +e.target.value; };
+  gd.on("plotly_clickannotation", (ev) => {
+    const j = labelIdx.indexOf(ev.index); if (j >= 0) setSolo(j);
+  });
+  $("play").onclick = () => (playing ? pause() : start());
+  $("rewind").onclick = () => seek(0);
+  $("vol").oninput = (e) => { master.gain.value = +e.target.value; };
+
+  function zoomTo(r0, r1) {
+    const w = Math.min(Math.max(r1 - r0, 0.02), dur);
+    r0 = Math.min(Math.max(r0, 0), dur - w);
+    return Plotly.relayout(gd, { "xaxis.range": [r0, r0 + w] });
+  }
+  function zoomBy(f) {
+    const [r0, r1] = gd._fullLayout.xaxis.range; const t = now();
+    const c = (t >= r0 && t <= r1) ? t : (r0 + r1) / 2; const w = (r1 - r0) * f;
+    zoomTo(c - w / 2, c + w / 2);
+  }
+  $("zin").onclick = () => zoomBy(0.5);
+  $("zout").onclick = () => zoomBy(2);
+  $("zfit").onclick = () => zoomTo(0, dur);
+
   function updateUi() {
-    playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
-    timeEl.textContent = now().toFixed(3) + " / " + dur.toFixed(3) + " s";
+    $("play").textContent = playing ? "⏸" : "▶";
+    $("clock").textContent = fmtClock(now());
   }
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
     if (e.code === "Space") { e.preventDefault(); playing ? pause() : start(); }
     else if (e.key === "Home") seek(0);
+    else if (e.key === "+" || e.key === "=") zoomBy(0.5);
+    else if (e.key === "-") zoomBy(2);
+    else if (e.key === "0") zoomTo(0, dur);
     else if (/^[1-9]$/.test(e.key) && +e.key <= DATA.tracks.length) setSolo(+e.key - 1);
   });
 
-  // ---- Playhead overlay (DOM line; cheaper than relayout on every frame) ------------------
-  const ph = document.getElementById("playhead");
+  // ---- Playhead overlay (DOM line; cheaper than relayout on every frame) ---------------------
+  const ph = $("playhead");
   function place(t) {
     const fl = gd._fullLayout; if (!fl) return;
     const xa = fl.xaxis; const [r0, r1] = xa.range;
@@ -187,29 +309,23 @@
   function tick() {
     const t = now();
     place(t);
-    timeEl.textContent = t.toFixed(3) + " / " + dur.toFixed(3) + " s";
+    $("clock").textContent = fmtClock(t);
     const ts = performance.now();
     if (ts - lastSlice > 100) { drawSlice(t); lastSlice = ts; }
-    if (follow.checked && !following) {
+    if ($("follow").checked && !following) {
       const [r0, r1] = gd._fullLayout.xaxis.range; const w = r1 - r0;
       if (w < dur * 0.98 && (t > r1 || t < r0)) {
         following = true;
-        Plotly.relayout(gd, { "xaxis.range": [t, t + w] }).then(() => { following = false; });
+        zoomTo(t, t + w).then(() => { following = false; });
       }
     }
     if (playing && t >= dur) { pause(); offset = dur; updateUi(); return; }
     if (playing) requestAnimationFrame(tick);
   }
   gd.on("plotly_click", (ev) => { if (ev.points && ev.points.length) seek(+ev.points[0].x); });
-  gd.on("plotly_hover", (ev) => {
-    if (playing || !ev.points || !ev.points.length) return;
-    const p = ev.points[0];
-    if (p.data.meta && (p.data.meta.kind === "spec" || p.data.meta.kind === "diff")) drawSlice(+p.x);
-  });
   gd.on("plotly_relayout", () => place(now()));
   window.addEventListener("resize", () => place(now()));
-  place(0); drawSlice(0);
-  sliceInfo.textContent = "Follows the playhead while playing; follows the mouse over a spectrogram while paused.";
+  place(0); drawSlice(0); updateUi();
 })();
 </script>
 </body>

@@ -42,7 +42,7 @@ def test_role_swap_and_reorder(data_dir):
     assert after.loc["SI-SDR (dB)", "processed"] == pytest.approx(first.loc["SI-SDR (dB)", "processed"])
     # Duplicate a role -> warning, metrics disabled.
     at.selectbox(key="role_s0_noisy").set_value("clean").run()
-    assert any("exactly one slot" in w.value for w in at.warning)
+    assert any("exactly once" in w.value for w in at.warning)
 
 
 def test_unresolved_triplet_asks_user(data_dir):
@@ -67,7 +67,7 @@ def test_figure_export_png_svg():
     params = dsp.StftParams(scale="mel")
     tracks = [figures.TrackView(i + 1, r, f"{r}.wav", x, 16000, dsp.spectrogram(x, 16000, params))
               for i, (r, x) in enumerate(zip(("clean", "noisy", "processed"), (c, n, p)))]
-    fig = figures.stacked_figure(tracks, [], (-110, -20))
+    fig = figures.stacked_figure(tracks, (-110, -20), monitored_slot=0)
     assert export.figure_image(fig, "png", 800, 1)[:4] == b"\x89PNG"
     assert b"<svg" in export.figure_image(fig, "svg", 800)[:500]
 
@@ -81,3 +81,22 @@ def test_strict_mismatch_shows_error(tmp_path, monkeypatch):
     at = AppTest.from_file(APP, default_timeout=120).run()
     assert any("processed: 48000 Hz ≠ clean: 16000 Hz" in e.value for e in at.error)
     assert len(at.dataframe) == 0  # nothing rendered
+
+
+def test_stacked_figure_overlays_waveform_per_track():
+    from viewer import dsp, figures
+
+    sig = make_triplet(16000, 1.0)
+    tracks = [figures.TrackView(i + 1, r, f"{r}.wav", x, 16000, dsp.spectrogram(x, 16000, dsp.StftParams()))
+              for i, (r, x) in enumerate(zip(("clean", "noisy", "processed"), sig))]
+    fig = figures.stacked_figure(tracks, (-110, -20), wave_opacity=0.5, monitored_slot=2)
+    kinds = [(tr.type, tr.meta["kind"], tr.meta["slot"]) for tr in fig.data]
+    assert kinds == [(t, k, s) for s in (1, 2, 3) for t, k in (("heatmap", "spec"), ("scatter", "wave"))]
+    # Each waveform sits on its own (hidden) axis overlaying its spectrogram's axis.
+    for heat, wave in zip(fig.data[0::2], fig.data[1::2]):
+        assert heat.xaxis == wave.xaxis and heat.yaxis != wave.yaxis
+        assert fig.layout[wave.yaxis.replace("y", "yaxis")].overlaying == heat.yaxis
+    labels = [a for a in fig.layout.annotations if a.name and a.name.startswith("label")]
+    assert len(labels) == 3 and "🎧" in labels[1].text and "🎧" not in labels[0].text
+    # Opacity 0 drops the overlay entirely.
+    assert all(tr.type == "heatmap" for tr in figures.stacked_figure(tracks, (-110, -20), wave_opacity=0).data)

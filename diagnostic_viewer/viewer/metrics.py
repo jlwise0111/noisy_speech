@@ -93,6 +93,29 @@ def compute_all(clean: np.ndarray, noisy: np.ndarray, processed: np.ndarray, sr:
     return pd.DataFrame(rows)
 
 
+SCORECARD = (
+    # (plain label, metric row, technical tooltip, decimals)
+    ("Separation", "SI-SDR (dB)", "SI-SDR in dB: how cleanly speech is separated from everything else", 1),
+    ("Quality", "PESQ", "PESQ (ITU-T P.862): predicted listening quality, ~1 (bad) to 4.5 (excellent)", 2),
+    ("Intelligibility", "STOI", "STOI: predicted word intelligibility, 0 to 1", 2),
+)
+
+
+def _num(v):
+    return None if v is None or (isinstance(v, float) and np.isnan(v)) else float(v)
+
+
+def scorecard(df: pd.DataFrame) -> list[dict]:
+    """The three headline metrics in plain language, for the top-right panel. Higher is better for all."""
+    rows = df.set_index("metric")
+    out = []
+    for label, metric, tip, decimals in SCORECARD:
+        r = rows.loc[metric]
+        out.append({"label": label, "tooltip": tip, "decimals": decimals, "noisy": _num(r["noisy"]),
+                    "processed": _num(r["processed"]), "delta": _num(r["Δ (processed − noisy)"])})
+    return out
+
+
 def flatten(df: pd.DataFrame) -> dict:
     """One-row dict (for batch CSV): e.g. {'SI-SDR (dB) noisy': .., 'SI-SDR (dB) processed': ..}."""
     out = {}
