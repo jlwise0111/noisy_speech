@@ -1,0 +1,180 @@
+# noisy_speech: tests, baseline data and the diagnostic viewer.
+#
+#   make            show this help
+#   make all        check → unit tests → build viewer → viewer tests → collect data → metrics → start viewer
+#   make train-evaluate   train/run every model, then score them all with the metric suite
+#
+# Override anything on the command line, e.g.
+#   make data DATASET=/path/to/valentini_noisy_speech_database
+#   make data-ridge FORCE=1          # redo runs that already exist
+#
+# Paths in this project contain spaces, so every path is quoted in the recipes and no file
+# targets are used: data targets skip a run whose completion marker already exists.
+
+SHELL   := /bin/bash
+PYTHON  ?= python3
+DATASET ?= $(or $(VALENTINI_DIR),/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database)
+FORCE   ?=
+PORT    ?= 8501
+URL     := http://localhost:$(PORT)
+
+LINEAR  := linear_baseline
+WIENER  := wiener_baseline
+VIEWER  := diagnostic_viewer
+METRICS := metric_suite
+METRICS_PY := .venv/bin/python
+METRIC_ARGS ?=
+COMPOSE := cd $(VIEWER) && PORT=$(PORT) docker compose
+
+# $(call already_ran,<marker file>): succeeds (and says so) if the run already finished and FORCE is unset.
+already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exists (FORCE=1 to redo)"
+
+.DEFAULT_GOAL := help
+.PHONY: help all check check-python check-docker check-dataset \
+        test test-linear test-wiener test-viewer test-metrics metrics-venv evaluate train-evaluate \
+        data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
+        data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
+        smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open status clean
+
+help: ## Show this help
+	@echo "Targets (run from the project folder):"
+	@grep -hE '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-22s\033[0m %s\n", $$1, $$2}'
+	@echo
+	@echo "Variables: DATASET=\"$(DATASET)\""
+	@echo "           PYTHON=$(PYTHON)  PORT=$(PORT)  FORCE=$(FORCE)"
+
+# ---------------------------------------------------------------------------- full pipeline
+all: check test-linear test-wiener test-metrics viewer-build test-viewer data evaluate viewer-up ## Whole suite in order, then start the viewer
+	@echo
+	@echo "✅ All tests passed, data collected and scored ($(METRICS)/results/summary.md), viewer at $(URL)"
+
+# ---------------------------------------------------------------------------- environment checks
+check: check-python check-docker check-dataset ## Check Python packages, Docker and the dataset
+
+check-python:
+	@$(PYTHON) -c "import numpy, scipy, soundfile, pytest" 2>/dev/null \
+	  && echo "  ✓ $(PYTHON): numpy, scipy, soundfile, pytest" \
+	  || { echo "  ✗ $(PYTHON) is missing packages. Install with:"; \
+	       echo "      $(PYTHON) -m pip install numpy scipy soundfile pytest"; exit 1; }
+
+check-docker:
+	@docker info >/dev/null 2>&1 && echo "  ✓ Docker is running" \
+	  || { echo "  ✗ Docker is not running (start Docker Desktop)"; exit 1; }
+
+check-dataset:
+	@for d in clean_testset_wav noisy_testset_wav clean_trainset_28spk_wav noisy_trainset_28spk_wav \
+	          clean_trainset_56spk_wav noisy_trainset_56spk_wav; do \
+	  test -d "$(DATASET)/$$d" || { echo "  ✗ missing $$d in DATASET=\"$(DATASET)\""; exit 1; }; \
+	done; echo "  ✓ Valentini dataset found"
+
+# ---------------------------------------------------------------------------- tests (each runs on its own)
+test: test-linear test-wiener test-metrics test-viewer ## Run all four test suites
+
+test-linear: check-python ## Ridge baseline unit tests (host Python)
+	@echo "▶ $(LINEAR) tests"
+	cd $(LINEAR) && $(PYTHON) -m pytest -q -p no:cacheprovider
+
+test-wiener: check-python ## Wiener baseline unit tests (host Python)
+	@echo "▶ $(WIENER) tests"
+	cd $(WIENER) && $(PYTHON) -m pytest tests -q -p no:cacheprovider
+
+test-metrics: metrics-venv ## Metric suite unit tests (its own .venv)
+	@echo "▶ $(METRICS) tests"
+	cd $(METRICS) && $(METRICS_PY) -m pytest -q -p no:cacheprovider
+
+test-viewer: viewer-build ## Viewer tests, inside the freshly built Docker image
+	@echo "▶ $(VIEWER) tests (in Docker)"
+	$(COMPOSE) run --rm --no-deps viewer python -m pytest -q -p no:cacheprovider
+
+# ---------------------------------------------------------------------------- data for the viewer
+# Each run writes <run>/{clean,noisy,enhanced|processed}/<stem>.wav for the 824-file test set.
+data: data-ridge data-wiener ## Collect every test-set run the viewer compares
+
+data-ridge: data-ridge-28spk data-ridge-56spk data-ridge-both ## Ridge baseline: train on 28spk, 56spk, both
+
+data-ridge-28spk: check-dataset
+	@$(call already_ran,$(LINEAR)/outputs/ridge_28spk/config.json) || \
+	  (cd $(LINEAR) && $(PYTHON) ridge_baseline.py --dataset "$(DATASET)" --train-set 28spk --run-name ridge_28spk)
+
+data-ridge-56spk: check-dataset
+	@$(call already_ran,$(LINEAR)/outputs/ridge_56spk/config.json) || \
+	  (cd $(LINEAR) && $(PYTHON) ridge_baseline.py --dataset "$(DATASET)" --train-set 56spk --run-name ridge_56spk)
+
+data-ridge-both: check-dataset
+	@$(call already_ran,$(LINEAR)/outputs/ridge_both/config.json) || \
+	  (cd $(LINEAR) && $(PYTHON) ridge_baseline.py --dataset "$(DATASET)" --train-set both --run-name ridge_both)
+
+data-wiener: data-wiener-leading data-wiener-minstats data-wiener-oracle ## Wiener baseline: leading, minstats, oracle (test set)
+
+data-wiener-leading: check-dataset
+	@$(call already_ran,$(WIENER)/outputs/wiener_leading_test/quick_metrics.csv) || \
+	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split test --noise-est leading)
+
+data-wiener-minstats: check-dataset
+	@$(call already_ran,$(WIENER)/outputs/wiener_minstats_test/quick_metrics.csv) || \
+	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split test --noise-est minstats)
+
+data-wiener-oracle: check-dataset
+	@$(call already_ran,$(WIENER)/outputs/oracle_test/quick_metrics.csv) || \
+	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split test --method oracle)
+
+data-wiener-train: check-dataset ## Optional: Wiener on the train28/train56 splits (~25 GB, not part of 'all')
+	@$(call already_ran,$(WIENER)/outputs/wiener_leading_train28/quick_metrics.csv) || \
+	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split train28)
+	@$(call already_ran,$(WIENER)/outputs/wiener_leading_train56/quick_metrics.csv) || \
+	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split train56)
+
+smoke: check-dataset ## Quick end-to-end check of both baselines on a few files (writes outputs/smoke*)
+	cd $(LINEAR) && $(PYTHON) ridge_baseline.py --dataset "$(DATASET)" --limit-files 500 --test-limit 5 --run-name smoke
+	cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split test --limit 5 --run-name smoke
+
+# ---------------------------------------------------------------------------- metric suite
+# PESQ/STOI live in metric_suite/.venv so the main Python environment is left alone.
+metrics-venv: check-python
+	@test -x "$(METRICS)/$(METRICS_PY)" || { echo "  creating $(METRICS)/.venv"; \
+	  cd $(METRICS) && $(PYTHON) -m venv .venv && $(METRICS_PY) -m pip install -q -r requirements.txt; }
+
+evaluate: metrics-venv ## Score every model run: PESQ-WB, STOI, SNR gain vs noisy (METRIC_ARGS="--force" to rescore)
+	cd $(METRICS) && $(METRICS_PY) evaluate_models.py $(METRIC_ARGS)
+	@echo "  Report: $(METRICS)/results/summary.md"
+
+train-evaluate: data evaluate ## Train/run all models (skipping finished runs), then evaluate them all
+
+# ---------------------------------------------------------------------------- diagnostic viewer (Docker)
+# DATA_DIR defaults to the project folder (see diagnostic_viewer/docker-compose.yml), so all runs show up.
+viewer: viewer-up viewer-open ## Build, start and open the viewer in your browser
+
+viewer-close: ## Shut the viewer down (stops and removes its container and network)
+	$(COMPOSE) down --remove-orphans
+	@echo "  Viewer stopped."
+
+viewer-build: check-docker ## Build the viewer image
+	$(COMPOSE) build
+
+viewer-up: viewer-build ## Start the viewer and wait until it answers
+	$(COMPOSE) up -d
+	@printf "  waiting for $(URL) "; for i in $$(seq 1 60); do \
+	  curl -sf "$(URL)/_stcore/health" >/dev/null && { echo "✓"; exit 0; }; printf "."; sleep 2; done; \
+	  echo " ✗ not healthy, see: make viewer-logs"; exit 1
+	@echo "  Viewer: $(URL)  (the first page load scans every .wav in the project; give it ~1 min)"
+
+viewer-down: ## Stop the viewer
+	$(COMPOSE) down
+
+viewer-logs: ## Follow the viewer logs
+	$(COMPOSE) logs -f
+
+viewer-open: ## Open the viewer in the default browser
+	open "$(URL)" 2>/dev/null || xdg-open "$(URL)"
+
+# ---------------------------------------------------------------------------- housekeeping
+status: ## List collected runs (files per run) and git branches
+	@for d in $(LINEAR)/outputs/* $(WIENER)/outputs/*; do \
+	  [ -d "$$d" ] || continue; \
+	  n=$$(ls "$$d"/enhanced "$$d"/processed 2>/dev/null | grep -c '\.wav$$'); \
+	  printf "  %-45s %6s files\n" "$$d" "$$n"; done
+	@git branch -vv
+
+clean: ## Remove Python caches (never touches outputs or the dataset)
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+	find . -name .pytest_cache -type d -prune -exec rm -rf {} +
