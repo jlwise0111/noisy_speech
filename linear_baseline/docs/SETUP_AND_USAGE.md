@@ -340,6 +340,21 @@ Measured on 2026-10-19: 16-core macOS, Python 3.13, dataset on an external RAID,
 
 Every sweep is shallow and U-shaped. Validation MSE is flat for α ≤ 10⁻³, reaches its minimum at α ≈ 0.01–0.03, and rises steeply above α ≈ 1. More training data lowers validation error, and the optimal α barely moves, which is what the per-frame α scaling (§10.4) is meant to achieve.
 
+### How much can α (λ) tuning gain?
+
+Ridge has one regularization hyperparameter. "α" (sklearn) and "λ" (textbooks) are the same penalty. To bound what any choice of it could achieve, compare three settings using `sweep_per_bin.csv`:
+- almost no regularization (α = 10⁻⁶);
+- the best single global α;
+- an *oracle* that picks the best α for every bin, scored on the validation set itself (an optimistic upper bound).
+
+| Train set | Val MSE, α = 10⁻⁶ | Best global α | Oracle per-bin α | Max improvement |
+|---|---|---|---|---|
+| `28spk` | 3.00225 | 3.00214 | 3.00123 | 0.034% |
+| `56spk` | 2.68653 | 2.68643 | 2.68490 | 0.061% |
+| `both` | 2.66687 | 2.66667 | 2.66477 | 0.079% |
+
+**Conclusion:** penalty tuning is not what limits this baseline. Each per-bin model has 9 parameters and millions of training frames, so it is far from overfitting, and shrinkage has almost nothing to correct. The sweep stays in the pipeline because the specification requires it and because it documents this. `--per-bin-alpha` is available but changes results only in the fourth decimal place. Real improvements need a different model capacity (wider context, non-linearity) or a different resynthesis (§14), not more regularization.
+
 ### 12.2 Test set (824 files, speakers p232 and p257)
 
 Checked with the diagnostic viewer's own `discover()` and `validate_strict()`. Every run gives **824/824 resolved triplets, 0 rejected, all 16 kHz mono**.
