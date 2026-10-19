@@ -4,6 +4,8 @@ This is a linear baseline for the speech-denoising project. It is a **per-freque
 
 It trains on the Valentini training set, picks α on held-out speakers, enhances the Valentini test set, and writes clean/noisy/enhanced triplets that `../diagnostic_viewer/` loads as-is. The dataset is only ever read.
 
+Full setup, usage, method and reference results: [docs/SETUP_AND_USAGE.md](docs/SETUP_AND_USAGE.md).
+
 ## Method
 | Step | Detail |
 |---|---|
@@ -25,7 +27,7 @@ pip install -r requirements.txt
 pytest -q
 
 DS="/path/to/valentini_noisy_speech_database"
-python ridge_baseline.py --dataset "$DS" --train-set 28spk          # ~40 s on 16 cores
+python ridge_baseline.py --dataset "$DS" --train-set 28spk          # ~40 s on 16 cores (56spk: several minutes, disk-bound)
 python ridge_baseline.py --dataset "$DS" --train-set 56spk
 python ridge_baseline.py --dataset "$DS" --train-set both           # union of both training folders
 ```

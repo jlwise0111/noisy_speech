@@ -84,10 +84,14 @@ def train(args, run_dir, t0):
     pairs = data.train_pairs(args.dataset, args.train_set)
     if args.limit_files:
         pairs = pairs[:args.limit_files]
-    tr_pairs, va_pairs, val_spk = data.split_by_speaker(pairs, args.val_speakers, args.val_frac, args.seed)
+    try:
+        tr_pairs, va_pairs, val_spk = data.split_by_speaker(pairs, args.val_speakers, args.val_frac, args.seed)
+    except ValueError as e:
+        sys.exit(str(e))
     if not tr_pairs or not va_pairs:
         sys.exit(f"Empty split: {len(tr_pairs)} train / {len(va_pairs)} val files. "
                  "Increase --limit-files or set --val-speakers.")
+    run_dir.mkdir(parents=True, exist_ok=True)
     log(f"Train set {args.train_set}: {len(tr_pairs)} train / {len(va_pairs)} val files "
         f"(val speakers: {', '.join(val_spk)})", t0)
 
@@ -199,10 +203,10 @@ def main(argv=None):
 
     run_name = args.run_name or f"ridge_{args.train_set}_{datetime.now():%Y%m%d_%H%M%S}"
     run_dir = out / run_name
-    run_dir.mkdir(parents=True, exist_ok=True)
     log(f"Run folder: {run_dir}", t0)
 
     if args.skip_train:
+        run_dir.mkdir(parents=True, exist_ok=True)
         model = load_model(args.model, args)
         info = {"model_from": str(args.model)}
     else:
