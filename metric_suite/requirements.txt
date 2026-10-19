@@ -1,0 +1,6 @@
+numpy
+scipy
+soundfile
+pesq==0.0.4
+pystoi==0.4.1
+pytest
