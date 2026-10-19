@@ -73,8 +73,8 @@ Resample or trim the files before loading them.
 The screen has three areas: the stacked spectrograms on the left, a numbers panel on the right, and a transport bar below the spectrograms.
 
 - **Header, top row:**
-  - **System** (Neural network / Wiener baseline / Ridge baseline) and **Run**. Switching either keeps the same file (e.g. `p232_001`) selected when the new run has it, so you can A/B systems on identical audio.
-  - **Match loudness (−16 LUFS):** plays *and draws* every track at the same integrated loudness (ITU-R BS.1770 / EBU R128 gating), so a processor that makes things quieter can be judged on sound quality alone. If reaching −16 LUFS would push any track's peak above −1 dBFS, all three are lowered by the same amount and the achieved level is shown. Waveforms, spectrograms, levels, long-term spectrum and loudness-over-time all follow the gain. **Quality scores always use the original files.**
+  - **System** (Neural network / Wiener baseline / Ridge baseline) and **Run** (shown by run name; hover ⓘ for every run's full path and file count). Switching either keeps the same file (e.g. `p232_001`) selected when the new run has it, so you can A/B systems on identical audio.
+  - **Match loudness** toggle (−16 LUFS; details in its ⓘ tooltip): plays *and draws* every track at the same integrated loudness (ITU-R BS.1770 / EBU R128 gating), so a processor that makes things quieter can be judged on sound quality alone. If reaching −16 LUFS would push any track's peak above −1 dBFS, all three are lowered by the same amount and the achieved level is shown. Waveforms, spectrograms, levels, long-term spectrum and loudness-over-time all follow the gain. **Quality scores always use the original files.**
 - **Header, second row:** a coloured badge with the **system** and **run** you are looking at and listening to, the file name, ◀/▶ and the file picker. The processed track's label and the line under the transport also name the system and run.
 
 - **Spectrograms:** one panel per track, with the waveform overlaid as in iZotope RX.

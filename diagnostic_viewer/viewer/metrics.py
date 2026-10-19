@@ -52,7 +52,9 @@ def pesq_score(est: np.ndarray, ref: np.ndarray, sr: int) -> MetricResult:
             ref, est = _resample(ref, sr, fs), _resample(est, sr, fs)
             note = f"resampled {sr}→{fs} Hz for scoring"
     try:
-        return MetricResult(float(pesq(fs, ref, est, mode)), f"{mode}" + (f"; {note}" if note else ""))
+        # On silent input pesq divides by zero internally before raising NoUtterancesError.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return MetricResult(float(pesq(fs, ref, est, mode)), f"{mode}" + (f"; {note}" if note else ""))
     except Exception as e:  # e.g. NoUtterancesError on silent input
         return MetricResult(None, f"PESQ failed: {e}")
 

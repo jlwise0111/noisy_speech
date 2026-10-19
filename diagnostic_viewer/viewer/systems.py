@@ -34,6 +34,11 @@ class Run:
     def label(self) -> str:
         return "(data folder root)" if self.path == ROOT_RUN else self.path
 
+    @property
+    def name(self) -> str:
+        """Short name for menus: the run's own folder, e.g. "ridge_28spk"."""
+        return "(data folder root)" if self.path == ROOT_RUN else self.path.rstrip("/").rpartition("/")[2]
+
 
 def split_key(key: str) -> tuple[str, str]:
     """Triplet key "a/b/p232_001" -> run "a/b", file stem "p232_001"."""

@@ -29,8 +29,35 @@ SYSTEM_COLORS = {"Neural network": "#a495ff", "Wiener baseline": "#4fd1a5", "Rid
 st.set_page_config(page_title="Speech Isolation Viewer", page_icon="🎧", layout="wide",
                    initial_sidebar_state="collapsed")
 st.markdown("""<style>
-.block-container{padding-top:2.6rem;padding-bottom:1rem;max-width:100%}
+.block-container{padding-top:2.6rem;padding-bottom:1rem;padding-left:2rem;padding-right:2rem;max-width:100%}
 h3{margin:0!important;padding:0!important}
+/* header: labels on buttons, popovers and toggles never break mid-word */
+.stButton button p,[data-testid="stPopover"] button p,[data-testid="stPopoverButton"] p,
+.stCheckbox label p{white-space:nowrap}
+.stButton button,[data-testid="stPopover"] button{padding-left:.6rem;padding-right:.6rem}
+/* header rows: selection on the left, tools on the right; fixed-size controls keep their natural width
+   and the rows wrap whole controls (never their labels) when the window is narrow */
+@media (min-width:641px){
+[data-testid="stHorizontalBlock"]:has(.stPopover){flex-wrap:wrap;row-gap:.5rem}
+[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]{flex:0 0 auto!important;width:auto!important}
+[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(1){flex:1 1 0!important;min-width:180px;max-width:280px}
+[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(2){flex:1.3 1 0!important;min-width:200px;max-width:360px}
+[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(3){padding-left:.5rem;min-height:2.5rem;display:flex;justify-content:center}
+[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(4){margin-left:auto}
+[data-testid="stHorizontalBlock"]:has(.np){flex-wrap:wrap;row-gap:.5rem}
+[data-testid="stHorizontalBlock"]:has(.np)>[data-testid="stColumn"]{flex:0 0 3rem!important;width:3rem!important;min-width:0;max-width:3rem}
+[data-testid="stHorizontalBlock"]:has(.np)>[data-testid="stColumn"]:nth-child(1){flex:2 1 0!important;width:auto!important;min-width:260px;max-width:none}
+[data-testid="stHorizontalBlock"]:has(.np)>[data-testid="stColumn"]:nth-child(4){flex:1 1 240px!important;width:auto!important;max-width:340px}
+}
+.stMarkdown:has(.np)>div{margin-bottom:0!important}
+/* the "now playing" block: which system + run + file is on screen */
+.np{display:flex;flex-direction:column;gap:5px;min-width:0;padding:2px 0 2px 12px;border-left:3px solid}
+.np-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
+.np-badge{color:#14161b;font-weight:700;font-size:.78rem;line-height:1;padding:4px 8px;
+  border-radius:3px;white-space:nowrap;align-self:center}
+.np h3{font-size:1.45rem!important;line-height:1.15!important;white-space:nowrap;font-weight:600}
+.np-path{color:#8a919e;font-size:.8rem;line-height:1.3;overflow-wrap:anywhere}
+.np-path b{color:#c3c8d1;font-weight:500}
 </style>""", unsafe_allow_html=True)
 
 
@@ -181,16 +208,25 @@ def file_label(i) -> str:
 
 
 # ---------------------------------------------------------------------------- header rows
-s_sys, s_run, s_lufs, s_tracks, s_disp = st.columns([2, 2.6, 1.7, 0.9, 0.9], vertical_alignment="bottom")
+def run_name(path: str) -> str:
+    """Run menu entry: its own folder name, or the full path if two runs of the system share that name."""
+    r = runs_by_path[path]
+    same = [o for o in systems[r.system] if o.name == r.name]
+    return r.name if len(same) == 1 else r.label
+
+
+s_sys, s_run, s_lufs, s_tracks, s_disp = st.columns([1.8, 2.4, 1.9, 1, 1.15], vertical_alignment="bottom")
 if runs_by_path:
     s_sys.selectbox("System", list(systems), key="system", on_change=on_system_change,
-                    format_func=lambda s: f"{s} — " + (f"{len(systems[s])} run(s)" if systems[s]
-                                                         else "no outputs yet"))
+                    help="Which processing system's output you are looking at and hearing.")
     if run:
-        s_run.selectbox("Run", [r.path for r in systems[ss.sel_system]], key="run",
-                        on_change=lambda: select_run(ss.run),
-                        format_func=lambda p: f"{runs_by_path[p].label}  ({len(runs_by_path[p].triplets)} files)")
-match_lufs = s_lufs.toggle(f"Match loudness ({TARGET_LUFS:g} LUFS)", key="match_lufs",
+        sys_runs = systems[ss.sel_system]
+        s_run.selectbox(f"Run ({len(sys_runs)} available)" if len(sys_runs) > 1 else "Run",
+                        [r.path for r in sys_runs], key="run",
+                        on_change=lambda: select_run(ss.run), format_func=run_name,
+                        help="Output folders of this system:  \n"
+                             + "  \n".join(f"`{r.label}` ({len(r.triplets)} files)" for r in sys_runs))
+match_lufs = s_lufs.toggle("Match loudness", key="match_lufs",
                            help=f"Play and draw every track at the same integrated loudness ({TARGET_LUFS:g} LUFS, "
                                 "ITU-R BS.1770), so quieter processing can be judged on sound quality alone. "
                                 "Quality scores are always computed from the original files.")
@@ -204,7 +240,7 @@ if runs_by_path and not run:
             f"{', '.join(dict(SYSTEMS).get(ss.sel_system, ()))} is listed under this system after **↻ Rescan folder**.")
     st.stop()
 
-h_title, h_prev, h_next, h_pick = st.columns([3.2, 0.45, 0.45, 3], vertical_alignment="center")
+h_title, h_prev, h_next, h_pick = st.columns([3.6, 0.5, 0.5, 2.6], vertical_alignment="center")
 h_prev.button("◀", on_click=step, args=(-1,), help="Previous file", use_container_width=True)
 h_next.button("▶", on_click=step, args=(1,), help="Next file", use_container_width=True)
 h_pick.selectbox("File", options, key="tri_idx", label_visibility="collapsed", format_func=file_label,
@@ -216,11 +252,15 @@ system_name = run.system if (run and tri) else "Manual selection"
 if tri:
     color = SYSTEM_COLORS.get(system_name, "#8a919e")
     h_title.markdown(
-        f"<span style='background:{color};color:#111;font-weight:700;padding:3px 9px;border-radius:4px'>"
-        f"{system_name}</span> <span style='color:#8a919e'>{run.label}</span>"
-        f"<h3 style='margin-top:4px!important'>{file_stem(ss.sel_tri)}</h3>", unsafe_allow_html=True)
+        f"<div class='np' style='border-left-color:{color}'><div class='np-top'>"
+        f"<span class='np-badge' style='background:{color}'>{system_name}</span>"
+        f"<h3>{file_stem(ss.sel_tri)}</h3></div>"
+        f"<div class='np-path' title='{run.label}'><b>{run.name}</b>"
+        f"{' in ' + run.label.rpartition('/')[0] if '/' in run.label else ''}"
+        f" <span style='white-space:nowrap'>· {len(run.triplets)} files</span></div></div>", unsafe_allow_html=True)
 else:
-    h_title.markdown("### Manual selection")
+    h_title.markdown("<div class='np' style='border-left-color:#8a919e'><h3>Manual selection</h3></div>",
+                     unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------- resolve the triplet
 rel = lambda p: str(p.relative_to(root_path)) if p else "—"  # noqa: E731
