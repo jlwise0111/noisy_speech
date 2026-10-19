@@ -156,7 +156,7 @@ viewer-up: viewer-build ## Start the viewer and wait until it answers
 	@printf "  waiting for $(URL) "; for i in $$(seq 1 60); do \
 	  curl -sf "$(URL)/_stcore/health" >/dev/null && { echo "✓"; exit 0; }; printf "."; sleep 2; done; \
 	  echo " ✗ not healthy, see: make viewer-logs"; exit 1
-	@echo "  Viewer: $(URL)  (the first page load scans every .wav in the project; give it ~1 min)"
+	@echo "  Viewer: $(URL)"
 
 viewer-down: ## Stop the viewer
 	$(COMPOSE) down

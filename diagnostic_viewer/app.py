@@ -62,12 +62,14 @@ h3{margin:0!important;padding:0!important}
 
 
 # ---------------------------------------------------------------------------- cached work
-@st.cache_data(show_spinner="Scanning dataset…")
+# cache_resource, not cache_data: one shared copy of the (large, read-only) scan results instead of
+# a pickled copy rebuilt on every rerun.
+@st.cache_resource(show_spinner="Scanning dataset…")
 def cached_discover(root: str, layout: str, folder_aliases: tuple, suffix_aliases: tuple, nonce: int):
     return discover(root, layout, {r: list(a) for r, a in folder_aliases}, {r: list(a) for r, a in suffix_aliases})
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def cached_list_wavs(root: str, nonce: int) -> list[Path]:
     return list_wavs(Path(root))
 
