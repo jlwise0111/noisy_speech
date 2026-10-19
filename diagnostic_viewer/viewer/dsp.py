@@ -152,6 +152,63 @@ def signal_stats(x: np.ndarray, sr: int, clip_threshold: float = 0.999) -> dict:
     }
 
 
+def k_weighting(sr: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    """ITU-R BS.1770-4 K-weighting at any sample rate: high-shelf ("head") then high-pass (RLB).
+
+    Bilinear designs from libebur128; at 48 kHz they reproduce the coefficients in the standard.
+    """
+    f0, gain_db, q = 1681.974450955533, 3.999843853973347, 0.7071752369554196
+    k = np.tan(np.pi * f0 / sr)
+    vh = 10 ** (gain_db / 20)
+    vb = vh ** 0.4996667741545416
+    a0 = 1 + k / q + k * k
+    shelf = (np.array([vh + vb * k / q + k * k, 2 * (k * k - vh), vh - vb * k / q + k * k]) / a0,
+             np.array([1.0, 2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0]))
+    f0, q = 38.13547087602444, 0.5003270373238773
+    k = np.tan(np.pi * f0 / sr)
+    a0 = 1 + k / q + k * k
+    highpass = (np.array([1.0, -2.0, 1.0]),
+                np.array([1.0, 2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0]))
+    return [shelf, highpass]
+
+
+def integrated_loudness(x: np.ndarray, sr: int) -> float:
+    """Integrated loudness of a mono signal in LUFS (ITU-R BS.1770-4 / EBU R128 gating).
+
+    400 ms blocks with 75% overlap, absolute gate at −70 LUFS, relative gate at −10 LU.
+    Signals shorter than one block are measured as a single block. Returns −inf for silence.
+    """
+    y = x.astype(np.float64)
+    for b, a in k_weighting(sr):
+        y = signal.lfilter(b, a, y)
+    block, step = int(round(0.4 * sr)), int(round(0.1 * sr))
+    if len(y) <= block:
+        z = np.array([np.mean(y**2)]) if len(y) else np.array([0.0])
+    else:
+        frames = np.lib.stride_tricks.sliding_window_view(y**2, block)[::step]
+        z = frames.mean(axis=1)
+    lufs = lambda p: -0.691 + 10 * np.log10(p + EPS)  # noqa: E731
+    z = z[lufs(z) > -70.0]
+    if not z.size:
+        return float("-inf")
+    z = z[lufs(z) > lufs(z.mean()) - 10.0]
+    return float(lufs(z.mean()))
+
+
+def loudness_match_gains(loudness: list[float], peaks: list[float], target_lufs: float = -16.0,
+                         ceiling_dbfs: float = -1.0) -> tuple[list[float], float]:
+    """Gains (dB) that bring every track to the same loudness, ideally `target_lufs`.
+
+    If reaching the target would push any track's sample peak above `ceiling_dbfs`, all tracks are
+    lowered by the same amount, so they stay equally loud relative to each other. Silent tracks
+    get 0 dB. Returns (gains_db, achieved_lufs).
+    """
+    gains = [0.0 if not np.isfinite(lv) else target_lufs - lv for lv in loudness]
+    over = [p + g - ceiling_dbfs for p, g, lv in zip(peaks, gains, loudness) if np.isfinite(lv)]
+    headroom = max([0.0] + over)
+    return [g - headroom if np.isfinite(lv) else 0.0 for g, lv in zip(gains, loudness)], target_lufs - headroom
+
+
 def waveform_envelope(x: np.ndarray, sr: int, max_points: int = 6000) -> tuple[np.ndarray, np.ndarray]:
     """Min/max-per-bucket decimation that preserves the visual waveform shape."""
     n = len(x)

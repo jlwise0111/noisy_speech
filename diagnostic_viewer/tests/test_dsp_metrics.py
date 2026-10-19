@@ -89,3 +89,35 @@ def test_noise_floor_tracks_pauses():
     card = scorecard(compute_all(clean, noisy, processed, SR))
     assert [c["label"] for c in card] == ["Separation", "Quality", "Intelligibility"]
     assert all(c["delta"] > 0 for c in card)
+
+
+def test_k_weighting_matches_bs1770_at_48k():
+    (b1, a1), (b2, a2) = dsp.k_weighting(48000)
+    np.testing.assert_allclose(b1, [1.53512485958697, -2.69169618940638, 1.19839281085285], atol=1e-9)
+    np.testing.assert_allclose(a1, [1.0, -1.69065929318241, 0.73248077421585], atol=1e-9)
+    np.testing.assert_allclose(b2, [1.0, -2.0, 1.0])
+    np.testing.assert_allclose(a2, [1.0, -1.99004745483398, 0.99007225036621], atol=1e-9)
+
+
+@pytest.mark.parametrize("sr", [16000, 48000])
+def test_integrated_loudness_reference_sine(sr):
+    t = np.arange(sr * 5) / sr
+    # BS.1770: a full-scale 1 kHz sine measures −3.01 LUFS (mono).
+    assert dsp.integrated_loudness(np.sin(2 * np.pi * 1000 * t), sr) == pytest.approx(-3.01, abs=0.06)
+    assert dsp.integrated_loudness(0.1 * np.sin(2 * np.pi * 1000 * t), sr) == pytest.approx(-23.01, abs=0.06)
+    assert dsp.integrated_loudness(np.zeros(sr), sr) == float("-inf")
+
+
+def test_loudness_match_gains_reach_target_and_respect_ceiling():
+    x = speech_like(SR, 3.0)
+    quiet = 0.05 * x / np.max(np.abs(x))
+    lv, pk = dsp.integrated_loudness(quiet, SR), 20 * np.log10(np.max(np.abs(quiet)))
+    gains, achieved = dsp.loudness_match_gains([lv], [pk], -16.0, ceiling_dbfs=0.0)
+    out = quiet * 10 ** (gains[0] / 20)
+    assert dsp.integrated_loudness(out, SR) == pytest.approx(achieved, abs=0.01)
+    assert 20 * np.log10(np.max(np.abs(out))) <= 1e-4  # float32 rounding
+    # Peaky track forces everyone down by the same amount; silent track is left alone.
+    gains, achieved = dsp.loudness_match_gains([-30.0, -20.0, float("-inf")], [-2.0, -1.0, -200.0], -16.0)
+    # Track 1 needs +14 dB, putting its -2 dBFS peak at +12 dBFS: 13 dB over the -1 dBFS ceiling.
+    assert achieved == pytest.approx(-29.0)
+    assert gains == pytest.approx([1.0, -9.0, 0.0])

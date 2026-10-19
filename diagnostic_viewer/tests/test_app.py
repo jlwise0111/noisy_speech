@@ -100,3 +100,50 @@ def test_stacked_figure_overlays_waveform_per_track():
     assert len(labels) == 3 and "🎧" in labels[1].text and "🎧" not in labels[0].text
     # Opacity 0 drops the overlay entirely.
     assert all(tr.type == "heatmap" for tr in figures.stacked_figure(tracks, (-110, -20), wave_opacity=0).data)
+
+
+@pytest.fixture
+def systems_dir(tmp_path, monkeypatch):
+    """Two systems with the same files; the Wiener run is much quieter."""
+    layout = {"linear_baseline/outputs/ridge_a": 1.0, "wiener_baseline/outputs/wiener_a": 0.05}
+    for run, gain in layout.items():
+        for i in range(2):
+            c, n, p = make_triplet(16000, 2.0, seed=i)
+            for role, x in (("clean", c), ("noisy", n), ("enhanced", p * gain)):
+                f = tmp_path / run / role / f"p232_00{i}.wav"
+                f.parent.mkdir(parents=True, exist_ok=True)
+                sf.write(f, x, 16000)
+    monkeypatch.setenv("VIEWER_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("VIEWER_EXPORT_DIR", str(tmp_path / "exports"))
+    return tmp_path
+
+
+def test_system_switch_keeps_file(systems_dir):
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="system").value == "Wiener baseline"  # first system with outputs
+    next(b for b in at.button if b.label == "▶").click().run()  # p232_000 -> p232_001
+    assert any("p232_001" in m.value and "Wiener baseline" in m.value for m in at.markdown)
+    at.selectbox(key="system").set_value("Ridge baseline").run()
+    assert not at.exception, at.exception
+    assert at.selectbox(key="run").value == "linear_baseline/outputs/ridge_a"
+    assert any("p232_001" in m.value and "Ridge baseline" in m.value for m in at.markdown)
+
+
+def test_neural_network_without_outputs_explains_layout(systems_dir):
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    at.selectbox(key="system").set_value("Neural network").run()
+    assert not at.exception, at.exception
+    assert any("no outputs found yet" in i.value for i in at.info)
+    at.selectbox(key="system").set_value("Ridge baseline").run()  # comes back with a file selected
+    assert not at.exception and len(at.dataframe) == 1
+
+
+def test_loudness_match_toggle(systems_dir):
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    before = at.dataframe[0].value.set_index("metric")
+    at.toggle(key="match_lufs").set_value(True).run()
+    assert not at.exception, at.exception
+    assert any("Loudness matched" in c.value for c in at.caption)
+    after = at.dataframe[0].value.set_index("metric")
+    assert after.loc["PESQ", "processed"] == before.loc["PESQ", "processed"]  # scores use the files

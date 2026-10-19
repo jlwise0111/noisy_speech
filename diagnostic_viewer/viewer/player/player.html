@@ -152,6 +152,10 @@
     const lvl = (v) => (v < -150 ? '<span class="muted">silent</span>' : fmtNum(v, 1, " dB"));
     const SHORT = { clean: "Clean", noisy: "Noisy", processed: "Proc." };
     const rows = [
+      ["LUFS", "lufs", (v) => (v === null || v < -150 ? '<span class="muted">silent</span>' : fmtNum(v, 1)),
+        "Integrated loudness as played (ITU-R BS.1770)"],
+      ["Match gain", "gain_db", (v) => (v === null ? '<span class="muted">off</span>' : (v >= 0 ? "+" : "") + fmtNum(v, 1, " dB")),
+        "Gain applied by 'Match loudness' to what you hear and see"],
       ["Peak", "peak_dbfs", lvl, "Highest sample level (dBFS)"],
       ["RMS", "rms_dbfs", lvl, "Average loudness over the whole file (dBFS)"],
       ["Max RMS", "max_rms_dbfs", lvl, "Loudest 20 ms moment (dBFS)"],

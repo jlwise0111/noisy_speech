@@ -9,6 +9,7 @@ import dataclasses
 import os
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -16,10 +17,14 @@ from viewer import dsp, export, figures, metrics
 from viewer.audio_io import Audio, TripletError, load_wav, to_wav_bytes, validate_strict
 from viewer.dataset import DEFAULT_FOLDER_ALIASES, DEFAULT_SUFFIX_ALIASES, ROLES, discover, list_wavs
 from viewer.player import player
+from viewer.systems import SYSTEMS, group_runs, split_key
 
 DATA_DIR = os.environ.get("VIEWER_DATA_DIR", "data")
 EXPORT_DIR = Path(os.environ.get("VIEWER_EXPORT_DIR", "exports"))
 MANUAL = "__manual__"
+TARGET_LUFS = -16.0
+SYSTEM_COLORS = {"Neural network": "#a495ff", "Wiener baseline": "#4fd1a5", "Ridge baseline": "#f39c12",
+                 "Other": "#8a919e"}
 
 st.set_page_config(page_title="Speech Isolation Viewer", page_icon="🎧", layout="wide",
                    initial_sidebar_state="collapsed")
@@ -64,9 +69,17 @@ def cached_stats(path: str, mtime: float, ch: int) -> dict:
 
 
 @st.cache_data(show_spinner=False, max_entries=96)
-def cached_wav_bytes(path: str, mtime: float, ch: int) -> bytes:
+def cached_wav_bytes(path: str, mtime: float, ch: int, gain_db: float = 0.0) -> bytes:
     a = cached_load(path, mtime)
-    return to_wav_bytes(a.channel(ch), a.sr)
+    return to_wav_bytes(a.channel(ch) * 10 ** (gain_db / 20), a.sr)
+
+
+@st.cache_data(show_spinner=False, max_entries=96)
+def cached_loudness(path: str, mtime: float, ch: int) -> tuple[float, float]:
+    """(integrated loudness in LUFS, sample peak in dBFS)."""
+    a = cached_load(path, mtime)
+    x = a.channel(ch)
+    return dsp.integrated_loudness(x, a.sr), float(20 * np.log10(np.max(np.abs(x)) + dsp.EPS))
 
 
 def mtime(p: Path) -> float:
@@ -101,32 +114,9 @@ with st.sidebar:
 root_path = Path(root)
 triplets = cached_discover(root, layout, folder_aliases, suffix_aliases, ss.nonce)
 all_wavs = cached_list_wavs(root, ss.nonce)
-options = list(range(len(triplets))) + [MANUAL]
-if ss.tri_idx not in options:  # dataset changed under us
-    ss.tri_idx = options[0]
 n_ok = sum(t.resolved for t in triplets)
 with st.sidebar:
     st.caption(f"{len(all_wavs)} .wav files · {len(triplets)} triplets ({n_ok} complete)")
-
-
-def step(delta: int):
-    i = options.index(ss.tri_idx) if ss.tri_idx in options else 0
-    ss.tri_idx = options[(i + delta) % len(options)]
-
-
-# ---------------------------------------------------------------------------- header row
-h_title, h_prev, h_next, h_pick, h_tracks, h_disp = st.columns([3.2, 0.45, 0.45, 3, 1, 1],
-                                                               vertical_alignment="center")
-h_prev.button("◀", on_click=step, args=(-1,), help="Previous triplet", use_container_width=True)
-h_next.button("▶", on_click=step, args=(1,), help="Next triplet", use_container_width=True)
-h_pick.selectbox("Triplet", options, key="tri_idx", label_visibility="collapsed",
-                 format_func=lambda i: "✎ Manual selection…" if i == MANUAL else triplets[i].label)
-tracks_pop = h_tracks.popover("Tracks", use_container_width=True)
-display_pop = h_disp.popover("⚙ Display", use_container_width=True)
-
-tri = None if ss.tri_idx == MANUAL else triplets[ss.tri_idx] if triplets else None
-tri_key = "manual" if tri is None else tri.stem
-h_title.markdown(f"### {tri.stem if tri else 'Manual selection'}")
 
 if not root_path.is_dir():
     st.error(f"Data folder `{root}` does not exist inside the container. Check DATA_DIR in `.env` "
@@ -134,8 +124,103 @@ if not root_path.is_dir():
     st.stop()
 if not all_wavs:
     st.info(f"No .wav files found under `{root}`. Put your audio in the folder set by DATA_DIR in `.env` "
-            "(default `./data`), or generate demo data — see README.")
+            "(default: the project folder), or generate demo data — see README.")
     st.stop()
+
+# ---------------------------------------------------------------------------- systems → runs → files
+systems = group_runs(triplets)
+runs_by_path = {r.path: r for rs in systems.values() for r in rs}
+
+
+# The selection lives in sel_* keys: Streamlit forgets a widget's value when the widget is not drawn
+# (e.g. while a system without outputs is selected), and the file should survive that.
+def file_stem(i) -> str | None:
+    return split_key(triplets[i].stem)[1] if isinstance(i, int) and i < len(triplets) else None
+
+
+def select_run(path: str):
+    """Switch to a run, keeping the same file (e.g. p232_001) selected if that run has it."""
+    run, stem = runs_by_path[path], file_stem(ss.get("sel_tri"))
+    ss.sel_run = path
+    same = [i for i in run.triplets if file_stem(i) == stem]
+    ss.sel_tri = same[0] if same else run.triplets[0]
+
+
+def on_system_change():
+    ss.sel_system = ss.system
+    if systems[ss.system]:
+        select_run(systems[ss.system][0].path)
+
+
+if runs_by_path:
+    if ss.get("sel_run") not in runs_by_path:  # first load, or the dataset changed under us
+        first = next(rs[0] for rs in systems.values() if rs)
+        ss.sel_system = first.system
+        select_run(first.path)
+    if ss.get("sel_system") not in systems:
+        ss.sel_system = runs_by_path[ss.sel_run].system
+    run = runs_by_path[ss.sel_run] if systems[ss.sel_system] else None
+    options = (run.triplets if run else []) + [MANUAL]
+else:  # wavs, but nothing that forms a triplet: manual selection only
+    run, options = None, [MANUAL]
+if ss.get("sel_tri") not in options:
+    ss.sel_tri = options[0]
+ss.system, ss.run, ss.tri_idx = ss.get("sel_system"), ss.get("sel_run"), ss.sel_tri  # mirror into widgets
+
+
+def step(delta: int):
+    i = options.index(ss.sel_tri) if ss.sel_tri in options else 0
+    ss.sel_tri = options[(i + delta) % len(options)]
+
+
+def file_label(i) -> str:
+    if i == MANUAL:
+        return "✎ Manual selection…"
+    t = triplets[i]
+    return f"✓ {file_stem(i)}" if t.resolved else f"⚠ {file_stem(i)} ({', '.join(t.issues)})"
+
+
+# ---------------------------------------------------------------------------- header rows
+s_sys, s_run, s_lufs, s_tracks, s_disp = st.columns([2, 2.6, 1.7, 0.9, 0.9], vertical_alignment="bottom")
+if runs_by_path:
+    s_sys.selectbox("System", list(systems), key="system", on_change=on_system_change,
+                    format_func=lambda s: f"{s} — " + (f"{len(systems[s])} run(s)" if systems[s]
+                                                         else "no outputs yet"))
+    if run:
+        s_run.selectbox("Run", [r.path for r in systems[ss.sel_system]], key="run",
+                        on_change=lambda: select_run(ss.run),
+                        format_func=lambda p: f"{runs_by_path[p].label}  ({len(runs_by_path[p].triplets)} files)")
+match_lufs = s_lufs.toggle(f"Match loudness ({TARGET_LUFS:g} LUFS)", key="match_lufs",
+                           help=f"Play and draw every track at the same integrated loudness ({TARGET_LUFS:g} LUFS, "
+                                "ITU-R BS.1770), so quieter processing can be judged on sound quality alone. "
+                                "Quality scores are always computed from the original files.")
+tracks_pop = s_tracks.popover("Tracks", use_container_width=True)
+display_pop = s_disp.popover("⚙ Display", use_container_width=True)
+
+if runs_by_path and not run:
+    st.info(f"**{ss.sel_system}: no outputs found yet** under `{root}`.  \n"
+            "Write them as `<folder>/<run>/{clean,noisy,enhanced}/<stem>.wav` (for example "
+            "`neural_network/outputs/crn_v1/enhanced/p232_001.wav`). Any folder name containing one of "
+            f"{', '.join(dict(SYSTEMS).get(ss.sel_system, ()))} is listed under this system after **↻ Rescan folder**.")
+    st.stop()
+
+h_title, h_prev, h_next, h_pick = st.columns([3.2, 0.45, 0.45, 3], vertical_alignment="center")
+h_prev.button("◀", on_click=step, args=(-1,), help="Previous file", use_container_width=True)
+h_next.button("▶", on_click=step, args=(1,), help="Next file", use_container_width=True)
+h_pick.selectbox("File", options, key="tri_idx", label_visibility="collapsed", format_func=file_label,
+                 on_change=lambda: ss.update(sel_tri=ss.tri_idx))
+
+tri = None if ss.sel_tri == MANUAL else triplets[ss.sel_tri]
+tri_key = "manual" if tri is None else tri.stem
+system_name = run.system if (run and tri) else "Manual selection"
+if tri:
+    color = SYSTEM_COLORS.get(system_name, "#8a919e")
+    h_title.markdown(
+        f"<span style='background:{color};color:#111;font-weight:700;padding:3px 9px;border-radius:4px'>"
+        f"{system_name}</span> <span style='color:#8a919e'>{run.label}</span>"
+        f"<h3 style='margin-top:4px!important'>{file_stem(ss.sel_tri)}</h3>", unsafe_allow_html=True)
+else:
+    h_title.markdown("### Manual selection")
 
 # ---------------------------------------------------------------------------- resolve the triplet
 rel = lambda p: str(p.relative_to(root_path)) if p else "—"  # noqa: E731
@@ -221,14 +306,46 @@ by_role = {role: entry for entry, role in entry_roles.items()} if roles_valid el
 
 # ---------------------------------------------------------------------------- main view
 order = ss[order_key]
+
+# Loudness matching: one gain per track, applied to what is drawn and played (never to the scores).
+loud = {e: cached_loudness(str(audios[e].path), mtime(audios[e].path), channel) for e in ROLES}
+gain_db = {e: 0.0 for e in ROLES}
+if match_lufs:
+    g, achieved = dsp.loudness_match_gains([loud[e][0] for e in ROLES], [loud[e][1] for e in ROLES], TARGET_LUFS)
+    gain_db = {e: round(v, 2) for e, v in zip(ROLES, g)}
+    note = (f"all tracks at **{achieved:.1f} LUFS**" if achieved == TARGET_LUFS else
+            f"all tracks at **{achieved:.1f} LUFS** (lowered {TARGET_LUFS - achieved:.1f} dB from {TARGET_LUFS:g} "
+            "so no track's peak exceeds −1 dBFS)")
+    st.caption(f"🔊 Loudness matched: {note}. Gain: "
+               + " · ".join(f"{entry_roles[e]} {gain_db[e]:+.1f} dB" for e in order)
+               + ". Quality scores use the original files.")
+sig = {e: audios[e].channel(channel) * 10 ** (gain_db[e] / 20) for e in ROLES}
+
+
+def display_name(entry: str) -> str:
+    name = audios[entry].path.name
+    return f"{name} · {system_name}: {run.label}" if entry == "processed" and run and tri else name
+
+
 with st.spinner("Drawing spectrograms…"):
     tracks, specs = [], {}
     for pos, entry in enumerate(order, start=1):
         a = audios[entry]
-        specs[entry] = cached_spec(str(a.path), mtime(a.path), channel, ptuple)
-        tracks.append(figures.TrackView(pos, entry_roles[entry], a.path.name, a.channel(channel), sr,
-                                        specs[entry]))
+        spec = cached_spec(str(a.path), mtime(a.path), channel, ptuple)
+        specs[entry] = dataclasses.replace(spec, db=spec.db + np.float32(gain_db[entry]))
+        tracks.append(figures.TrackView(pos, entry_roles[entry], display_name(entry), sig[entry], sr, specs[entry]))
     fig = figures.stacked_figure(tracks, db_range, colormap, wave_opacity, shared_amp)
+
+
+def level_stats(entry: str) -> dict:
+    """Level readouts as heard: dB values shifted by the matching gain, plus loudness."""
+    s = dict(cached_stats(str(audios[entry].path), mtime(audios[entry].path), channel))
+    for k in ("peak_dbfs", "rms_dbfs", "max_rms_dbfs", "noise_floor_dbfs"):
+        s[k] += gain_db[entry]
+    s["lufs"] = loud[entry][0] + gain_db[entry]
+    s["gain_db"] = gain_db[entry] if match_lufs else None
+    return s
+
 
 metrics_df = None
 if roles_valid:
@@ -241,12 +358,13 @@ chans = "mono" if n_ch == 1 else f"{n_ch} ch (showing ch {channel + 1})"
 player(
     fig,
     [{"slot": t.slot, "role": t.role, "name": t.name,
-      "wav": cached_wav_bytes(str(audios[e].path), mtime(audios[e].path), channel)}
+      "wav": cached_wav_bytes(str(audios[e].path), mtime(audios[e].path), channel, gain_db[e])}
      for t, e in zip(tracks, order)],
     duration, scale, db_range, {t.slot: t.spec.freqs for t in tracks},
-    stats=[cached_stats(str(audios[e].path), mtime(audios[e].path), channel) for e in order],
+    stats=[level_stats(e) for e in order],
     scorecard=metrics.scorecard(metrics_df) if metrics_df is not None else None,
-    format_line=f"{sr / 1000:g} kHz · {bits} · {chans} · {duration:.3f} s",
+    format_line=f"{system_name} · {run.label if run and tri else 'manual'} · {sr / 1000:g} kHz · {bits} · "
+                f"{chans} · {duration:.3f} s" + (f" · matched to {TARGET_LUFS:g} LUFS" if match_lufs else ""),
     show_slice=show_slice,
 )
 
@@ -269,14 +387,14 @@ with st.expander("Analysis & export", expanded=False):
             st.info("Assign each role once to compare tracks.")
 
     with tab_l:
-        lt = {entry_roles[e]: dsp.ltas(audios[e].channel(channel), sr, n_fft=max(2048, n_fft), window=window)
+        lt = {entry_roles[e]: dsp.ltas(sig[e], sr, n_fft=max(2048, n_fft), window=window)
               for e in order}
         st.plotly_chart(figures.ltas_figure(lt, log_freq=scale != "linear"), use_container_width=True,
                         theme=None)
         st.caption("Average spectrum over the whole file.")
 
     with tab_e:
-        env = {entry_roles[e]: dsp.rms_envelope(audios[e].channel(channel), sr) for e in order}
+        env = {entry_roles[e]: dsp.rms_envelope(sig[e], sr) for e in order}
         st.plotly_chart(figures.envelope_figure(env), use_container_width=True, theme=None)
         st.caption("Loudness in 20 ms steps. Look for pumping or gating in the pauses.")
 
@@ -326,12 +444,15 @@ with st.expander("Analysis & export", expanded=False):
             st.caption("Unavailable until each role is assigned exactly once.")
 
         st.divider()
-        st.markdown(f"**Batch metrics: all {len(triplets)} triplets in `{root}`**")
+        batch = [triplets[i] for i in run.triplets] if run else triplets
+        n_batch_ok = sum(t.resolved for t in batch)
+        st.markdown(f"**Batch metrics: all {len(batch)} files in "
+                    f"{system_name + ' · ' + run.label if run else '`' + root + '`'}**")
         st.caption("Uses the discovered roles (not the Tracks menu). Incomplete or mismatched triplets are "
                    "listed with a status instead of scores.")
-        if st.button(f"Run batch ({n_ok} complete triplets)", disabled=n_ok == 0):
+        if st.button(f"Run batch ({n_batch_ok} complete triplets)", disabled=n_batch_ok == 0):
             bar = st.progress(0.0, text="Starting…")
-            df = export.batch_metrics(triplets, root_path, channel,
+            df = export.batch_metrics(batch, root_path, channel,
                                       progress=lambda i, n, s: bar.progress(i / max(n, 1), text=f"{i}/{n} {s}"))
             name = f"metrics_batch_{export.timestamp()}.csv"
             ss["batch"] = (name, df)
