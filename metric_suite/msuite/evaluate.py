@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import math
 from datetime import datetime
-from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -47,25 +46,57 @@ def _read_csv(path: Path) -> list[dict]:
     return rows
 
 
+def _score_job(job: tuple[int, str, Run]) -> tuple[int, dict]:
+    i, stem, run = job
+    return i, _score(stem, run)
+
+
+def evaluate_runs(found: list[Run], results_dir: Path, pool: Pool | None, limit: int | None = None,
+                  force: bool = False, log=print) -> list[list[dict]]:
+    """Per-file rows for every run, in the order of `found`.
+
+    A run whose cached CSV is newer than its outputs is read back. Every other (run, file) pair goes
+    into ONE shared work queue, so all runs are scored at the same time and the pool never idles
+    waiting for the last files of one run before starting the next."""
+    results: list[list[dict] | None] = [None] * len(found)
+    jobs = []
+    for i, run in enumerate(found):
+        stems = run.stems()[:limit] if limit else run.stems()
+        path = cache_path(results_dir, run)
+        if not force and path.exists() and path.stat().st_mtime >= run.newest_mtime():
+            rows = _read_csv(path)
+            if [r["stem"] for r in rows] == stems:
+                log(f"  ✓ {run.rel}: {len(rows)} files (cached; --force to rescore)")
+                results[i] = rows
+                continue
+        log(f"  ▶ {run.rel}: scoring {len(stems)} files…")
+        jobs += [(i, stem, run) for stem in stems]
+
+    scored: dict[int, dict[str, dict]] = {}
+    done_jobs = pool.imap_unordered(_score_job, jobs, chunksize=4) if pool else map(_score_job, jobs)
+    for n, (i, row) in enumerate(done_jobs, 1):
+        scored.setdefault(i, {})[row["stem"]] = row
+        if n % 500 == 0 or n == len(jobs):
+            log(f"    {n}/{len(jobs)} files scored")
+
+    for i, by_stem in scored.items():
+        run = found[i]
+        stems = run.stems()[:limit] if limit else run.stems()
+        rows = [by_stem[s] for s in stems]
+        path = cache_path(results_dir, run)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", newline="") as f:
+            w = csv.DictWriter(f, FILE_COLUMNS, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows)
+        results[i] = rows
+    return [r if r is not None else [] for r in results]
+
+
 def evaluate_run(run: Run, results_dir: Path, pool: Pool | None, limit: int | None = None,
                  force: bool = False, log=print) -> list[dict]:
     """Per-file rows for one run, reusing the cached CSV when it is newer than the run's outputs."""
-    stems = run.stems()[:limit] if limit else run.stems()
-    path = cache_path(results_dir, run)
-    if not force and path.exists() and path.stat().st_mtime >= run.newest_mtime():
-        rows = _read_csv(path)
-        if [r["stem"] for r in rows] == stems:
-            log(f"  ✓ {run.rel}: {len(rows)} files (cached; --force to rescore)")
-            return rows
-    log(f"  ▶ {run.rel}: scoring {len(stems)} files…")
-    fn = partial(_score, run=run)
-    rows = list(pool.imap(fn, stems, chunksize=4)) if pool else [fn(s) for s in stems]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, FILE_COLUMNS, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    return rows
+    return evaluate_runs([run], results_dir, pool, limit, force, log)[0]
 
 
 def summarize(run: Run, rows: list[dict], ref_pesq: float, ref_stoi: float) -> dict:
@@ -102,7 +133,8 @@ def _f(v: float, d: int = 2, sign: bool = False) -> str:
     return f"{v:+.{d}f}" if sign else f"{v:.{d}f}"
 
 
-def markdown_report(summaries: list[dict], ref_pesq: float, ref_stoi: float, root: Path) -> str:
+def markdown_report(summaries: list[dict], ref_pesq: float, ref_stoi: float, root: Path | str) -> str:
+    """`root` is shown as given: pass a path relative to the project so the report names no machine."""
     lines = [
         "# Metric suite report",
         "",

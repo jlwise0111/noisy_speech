@@ -54,7 +54,7 @@ Each run is assigned to a **system** by the words in its folder path:
 
 | System | Folder words | Example run folder |
 |---|---|---|
-| Neural network | `neural`, `nn`, `dnn`, `network`, `unet` | `neural_network/outputs/crn_v1/` |
+| Neural network | `neural`, `nn`, `dnn`, `network`, `unet` | `unet_model/outputs/unet_28spk/` |
 | Wiener baseline | `wiener`, `oracle` | `wiener_baseline/outputs/wiener_leading_test/` |
 | Ridge baseline | `ridge`, `linear` | `linear_baseline/outputs/ridge_28spk/` |
 | Other | anything else | `diagnostic_viewer/data/demo/subfolders/` |

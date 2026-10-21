@@ -33,11 +33,11 @@ A run is any folder that has `clean/`, `noisy/` and one of `processed/`, `enhanc
 
 | System (from folder words) | Example run |
 |---|---|
-| Neural network (`neural`, `nn`, `dnn`, `network`, `unet`) | `neural_network/outputs/<run>/` (not built yet) |
+| Neural network (`neural`, `nn`, `dnn`, `network`, `unet`) | `unet_model/outputs/unet_28spk/` |
 | Wiener baseline (`wiener`, `oracle`) | `wiener_baseline/outputs/wiener_leading_test/` |
 | Ridge baseline (`ridge`, `linear`) | `linear_baseline/outputs/ridge_28spk/` |
 
-When the neural network writes its predictions in the same layout, it is picked up automatically.
+The U-Net (`unet_model/`) writes this layout too, so it is picked up automatically.
 
 Some folders are skipped by default (override with `--exclude ''`):
 - training-split outputs (paths containing `train`);

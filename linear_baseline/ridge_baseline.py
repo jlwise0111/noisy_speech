@@ -26,6 +26,7 @@ from lrb import data, ridge, synth  # noqa: E402
 from lrb.features import N_FEATURES  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
+REPO = HERE.parent
 DEFAULT_ALPHAS = np.logspace(-6, 2, 17)  # per-frame penalty, see lrb/ridge.py
 
 
@@ -44,7 +45,11 @@ def parse_args(argv=None):
     ap.add_argument("--sr", type=int, default=16000)
     ap.add_argument("--n-fft", type=int, default=512)
     ap.add_argument("--hop", type=int, default=128)
-    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    ap.add_argument("--workers", type=int,
+                    default=max(1, ((getattr(os, "process_cpu_count", None) or os.cpu_count)() or 2) - 1),
+                    help="parallel worker processes (default: available cores minus one)")
+    ap.add_argument("--cache-dir", type=Path, default=None,
+                    help="shared speechprep waveform cache (e.g. ../.cache/speechprep); default: no cache")
     ap.add_argument("--limit-files", type=int, default=None, help="Use only the first N training pairs")
     ap.add_argument("--test-limit", type=int, default=None, help="Enhance only the first N test pairs")
     ap.add_argument("--out", type=Path, default=HERE / "outputs")
@@ -62,22 +67,26 @@ def chunks(seq, size):
     return [seq[i:i + size] for i in range(0, len(seq), size)]
 
 
-def accumulate(pairs, args, pool, label, t0):
-    """Sum per-file statistics over `pairs` in parallel, printing progress."""
-    total = ridge.Stats.zeros(args.n_fft // 2 + 1, N_FEATURES)
-    work = chunks(pairs, 16)
+def accumulate(splits, args, pool, t0):
+    """Sum per-file statistics for every split in one parallel pass, printing progress.
+
+    `splits` maps a name ("train", "val") to its pairs. All chunks share one queue, so no worker
+    sits idle while the last chunks of one split finish before the next split starts."""
+    totals = {name: ridge.Stats.zeros(args.n_fft // 2 + 1, N_FEATURES) for name in splits}
+    work = [(name, c) for name, pairs in splits.items() for c in chunks(pairs, 16)]
     fn = partial(_chunk_stats, sr=args.sr, n_fft=args.n_fft, hop=args.hop)
-    done = 0
-    for i, (n_files, s) in enumerate(pool.imap_unordered(fn, work), 1):
-        total = total + s
+    n_all, done = sum(len(p) for p in splits.values()), 0
+    for i, (name, n_files, s) in enumerate(pool.imap_unordered(fn, work), 1):
+        totals[name] = totals[name] + s
         done += n_files
         if i % 25 == 0 or i == len(work):
-            log(f"{label}: {done}/{len(pairs)} files", t0)
-    return total
+            log(f"train + val stats: {done}/{n_all} files", t0)
+    return totals
 
 
-def _chunk_stats(pairs, **kw):
-    return len(pairs), synth.chunk_stats(pairs, **kw)
+def _chunk_stats(item, **kw):
+    name, pairs = item
+    return name, len(pairs), synth.chunk_stats(pairs, **kw)
 
 
 def train(args, run_dir, t0):
@@ -95,9 +104,9 @@ def train(args, run_dir, t0):
     log(f"Train set {args.train_set}: {len(tr_pairs)} train / {len(va_pairs)} val files "
         f"(val speakers: {', '.join(val_spk)})", t0)
 
-    with Pool(args.workers) as pool:
-        tr = accumulate(tr_pairs, args, pool, "train stats", t0)
-        va = accumulate(va_pairs, args, pool, "val stats", t0)
+    with Pool(args.workers, initializer=data.use_cache, initargs=(args.cache_dir, args.sr)) as pool:
+        totals = accumulate({"train": tr_pairs, "val": va_pairs}, args, pool, t0)
+    tr, va = totals["train"], totals["val"]
 
     alphas = np.asarray(args.alphas if args.alphas else DEFAULT_ALPHAS, dtype=np.float64)
     tr_mse, va_mse = ridge.sweep(tr, va, alphas)  # (A, F)
@@ -166,9 +175,10 @@ def load_model(path, args):
 _MODEL = None
 
 
-def _init_worker(W, b, alpha):
+def _init_worker(W, b, alpha, cache_dir, sr):
     global _MODEL
     _MODEL = ridge.Model(W=W, b=b, alpha=alpha)
+    data.use_cache(cache_dir, sr)
 
 
 def _enhance_one(pair, run_dir, sr, n_fft, hop):
@@ -184,11 +194,20 @@ def enhance_test(model, args, run_dir, t0):
     if args.test_limit:
         pairs = pairs[:args.test_limit]
     fn = partial(_enhance_one, run_dir=run_dir, sr=args.sr, n_fft=args.n_fft, hop=args.hop)
-    with Pool(args.workers, initializer=_init_worker, initargs=(model.W, model.b, model.alpha)) as pool:
+    with Pool(args.workers, initializer=_init_worker, initargs=(model.W, model.b, model.alpha, args.cache_dir, args.sr)) as pool:
         for i, _ in enumerate(pool.imap_unordered(fn, pairs, chunksize=8), 1):
             if i % 100 == 0 or i == len(pairs):
                 log(f"test enhance: {i}/{len(pairs)} files", t0)
     return len(pairs)
+
+
+def portable(path: Path) -> str:
+    """`path` relative to the project folder when it is inside it, so config.json names no machine."""
+    path = Path(path).resolve()
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return path.name
 
 
 def main(argv=None):
@@ -208,19 +227,20 @@ def main(argv=None):
     if args.skip_train:
         run_dir.mkdir(parents=True, exist_ok=True)
         model = load_model(args.model, args)
-        info = {"model_from": str(args.model)}
+        info = {"model_from": portable(args.model)}
     else:
         model, info = train(args, run_dir, t0)
     t_train = time.time() - t0
 
     n_test = enhance_test(model, args, run_dir, t0)
 
-    config = {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()}
+    config = {k: (portable(v) if isinstance(v, Path) else v) for k, v in vars(args).items()}
+    config["dataset"] = dataset.name
     config.update(info, test_files=n_test, train_seconds=round(t_train, 1),
                   total_seconds=round(time.time() - t0, 1))
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
     log(f"Done. {n_test} triplets in {run_dir}", t0)
-    print(f"View: cd diagnostic_viewer && DATA_DIR={out} docker compose up")
+    print("Score: make evaluate;  listen: make viewer  (from the project folder)")
 
 
 if __name__ == "__main__":

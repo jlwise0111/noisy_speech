@@ -3,8 +3,10 @@
 #   make            show this help
 #   make all        check → unit tests → build viewer → viewer tests → collect data → metrics → start viewer
 #   make train-evaluate   train/run every model, then score them all with the metric suite
+#   make pipeline   train every model at the same time → score them all → open the viewer
 #
-# Override anything on the command line, e.g.
+# The dataset path comes from DATASET, else $VALENTINI_DIR. Set it once per machine in an untracked
+# local.mk (one line: DATASET := /path/to/valentini_noisy_speech_database), or on the command line:
 #   make data DATASET=/path/to/valentini_noisy_speech_database
 #   make data-ridge FORCE=1          # redo runs that already exist
 #
@@ -12,8 +14,9 @@
 # targets are used: data targets skip a run whose completion marker already exists.
 
 SHELL   := /bin/bash
+-include local.mk
 PYTHON  ?= python3
-DATASET ?= $(or $(VALENTINI_DIR),/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database)
+DATASET ?= $(VALENTINI_DIR)
 FORCE   ?=
 PORT    ?= 8501
 URL     := http://localhost:$(PORT)
@@ -27,6 +30,7 @@ UNET_PY := .venv/bin/python
 UNET_ARGS ?=
 METRICS_PY := .venv/bin/python
 METRIC_ARGS ?=
+PIPELINE_ARGS ?=
 COMPOSE := cd $(VIEWER) && PORT=$(PORT) docker compose
 
 # $(call already_ran,<marker file>): succeeds (and says so) if the run already finished and FORCE is unset.
@@ -35,7 +39,7 @@ already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exi
 .DEFAULT_GOAL := help
 .PHONY: help all check check-python check-docker check-dataset \
         test test-linear test-wiener test-viewer test-metrics test-unet metrics-venv unet-venv evaluate train-evaluate \
-        data-unet unet-smoke unet-all \
+        data-unet unet-smoke unet-all pipeline pipeline-smoke \
         data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
         data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
         smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open status clean
@@ -66,6 +70,8 @@ check-docker:
 	  || { echo "  ✗ Docker is not running (start Docker Desktop)"; exit 1; }
 
 check-dataset:
+	@test -n "$(DATASET)" || { echo "  ✗ no dataset path: set DATASET=/path/to/valentini_noisy_speech_database"; \
+	  echo "    (on the command line, in local.mk, or export VALENTINI_DIR)"; exit 1; }
 	@for d in clean_testset_wav noisy_testset_wav clean_trainset_28spk_wav noisy_trainset_28spk_wav \
 	          clean_trainset_56spk_wav noisy_trainset_56spk_wav; do \
 	  test -d "$(DATASET)/$$d" || { echo "  ✗ missing $$d in DATASET=\"$(DATASET)\""; exit 1; }; \
@@ -150,7 +156,7 @@ data-unet: unet-venv check-dataset ## Train the U-Net on 28spk and enhance the t
 	@if test -z "$(FORCE)" && grep -qs '"seconds"' "$(UNET)/outputs/$(UNET_RUN)/config.json"; then \
 	  echo "  ✓ skip: $(UNET)/outputs/$(UNET_RUN) is a finished run (FORCE=1 to redo)"; \
 	elif pgrep -f -- "--run-name $(UNET_RUN)( |$$)" >/dev/null; then \
-	  echo "  ✗ $(UNET_RUN) is already training (see $(UNET)/$(UNET_RUN).log); not starting a second copy"; exit 1; \
+	  echo "  ✗ $(UNET_RUN) is already training (by make pipeline: see logs/$(UNET_RUN).log); not starting a second copy"; exit 1; \
 	else \
 	  cd $(UNET) && $(UNET_PY) -u train_unet.py --dataset "$(DATASET)" --train-set 28spk --run-name $(UNET_RUN) \
 	    $(if $(FORCE),,--resume) $(UNET_ARGS); \
@@ -166,6 +172,18 @@ unet-all: ## U-Net in order: venv → tests → smoke run → full training (hou
 
 unet-smoke: unet-venv check-dataset ## U-Net end to end on 300 files, 2 epochs (~3 min)
 	cd $(UNET) && $(UNET_PY) train_unet.py --dataset "$(DATASET)" --limit-files 300 --epochs 2 --test-limit 20 --run-name unet_smoke
+
+# ---------------------------------------------------------------------------- everything at once
+# run_pipeline.py does the scheduling in Python: one 16 kHz cache pass, then every model side by side
+# within the core budget Python detects (PIPELINE_ARGS="--cores N" to change it), then one scoring pass,
+# then the viewer. Finished runs are skipped; FORCE=1 redoes them. Logs go to logs/<run>.log.
+pipeline: unet-venv metrics-venv check-dataset ## Train every model at once → score all → open the viewer (hours)
+	@if pgrep -f -- "--run-name $(UNET_RUN)( |$$)" >/dev/null; then \
+	  echo "  ✗ $(UNET_RUN) is already training; not starting a second pipeline"; exit 1; fi
+	$(PYTHON) run_pipeline.py --dataset "$(DATASET)" --port $(PORT) $(if $(FORCE),--force) $(PIPELINE_ARGS)
+
+pipeline-smoke: unet-venv metrics-venv check-dataset ## The pipeline on a few files (smoke_* runs, minutes, no viewer)
+	$(PYTHON) run_pipeline.py --dataset "$(DATASET)" --smoke --skip-viewer $(if $(FORCE),--force) $(PIPELINE_ARGS)
 
 # ---------------------------------------------------------------------------- metric suite
 # PESQ/STOI live in metric_suite/.venv so the main Python environment is left alone.

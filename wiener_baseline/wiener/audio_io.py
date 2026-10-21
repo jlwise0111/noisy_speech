@@ -5,10 +5,14 @@ The dataset is only ever read from; outputs are written elsewhere.
 from __future__ import annotations
 
 import sys
+from math import gcd
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import resample_poly
+
+SR = 16000  # processing rate: Valentini is 48 kHz, but PESQ-WB is defined at 16 kHz and it is 3x less work
 
 # split name -> (noisy folder, clean folder)
 SPLITS = {
@@ -40,12 +44,19 @@ def find_pairs(dataset_root: Path, split: str) -> list[tuple[str, Path, Path]]:
     return [(s, noisy[s], clean[s]) for s in sorted(noisy.keys() & clean.keys())]
 
 
-def read_wav(path: Path) -> tuple[np.ndarray, int]:
-    """Read a mono WAV as float32 in [-1, 1]."""
-    x, sr = sf.read(path, dtype="float32", always_2d=True)
+def read_wav(path: Path, sr: int | None = None) -> tuple[np.ndarray, int]:
+    """Read a mono WAV as float32 in [-1, 1], resampled to `sr` (None keeps the file's rate).
+
+    Resampling is the same polyphase filter as speechprep.load_audio, so a waveform read here is
+    identical to the one in the shared 16 kHz cache."""
+    x, file_sr = sf.read(path, dtype="float32", always_2d=True)
     if x.shape[1] != 1:
         raise ValueError(f"expected mono, got {x.shape[1]} channels: {path}")
-    return x[:, 0], sr
+    x = x[:, 0]
+    if sr is None or sr == file_sr:
+        return x, file_sr
+    g = gcd(sr, file_sr)
+    return resample_poly(x, sr // g, file_sr // g).astype(np.float32), sr
 
 
 def write_wav(path: Path, x: np.ndarray, sr: int) -> None:

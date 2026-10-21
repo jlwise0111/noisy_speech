@@ -116,13 +116,9 @@ valentini_noisy_speech_database/
 - macOS `._*` resource-fork files are ignored.
 - The speaker id is the filename prefix before the first underscore (`p232`). Validation splits always hold out **whole speakers**, so validation measures generalisation to unseen voices.
 
-On this project's machine the dataset lives at:
-```
-/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database
-```
-Quote the path in the shell because it contains spaces. A convenient pattern:
+Keep the dataset anywhere outside the repository. Quote the path in the shell if it contains spaces. A convenient pattern:
 ```bash
-export DS="/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database"
+export DS="/path/to/valentini_noisy_speech_database"
 ```
 
 ---
@@ -143,7 +139,7 @@ python ridge_baseline.py --dataset "$DS" --train-set 28spk     # standard Valent
 python ridge_baseline.py --dataset "$DS" --train-set 56spk     # larger, different speakers
 python ridge_baseline.py --dataset "$DS" --train-set both      # union of 28spk + 56spk (no shared speakers)
 ```
-Every run trains, sweeps α, refits, and enhances all 824 test files. On a 16-core Mac reading from the external RAID, runs take about 40 s (28spk) to about 7 min (56spk, first read). The time is mostly file reading; the solve itself is instant (see §12).
+Every run trains, sweeps α, refits, and enhances all 824 test files. Run time depends on the machine and the drive: it is mostly reading and resampling files, and the solve itself is instant (see §12). `--workers` sets how many files are processed at once (default: available cores − 1). `--cache-dir ../.cache/speechprep` reads the shared 16 kHz waveform cache, so files are read and resampled only once across every model; `make pipeline` sets both automatically.
 
 ### 6.3 Typical terminal output
 ```
@@ -161,7 +157,7 @@ Every run trains, sweeps α, refits, and enhances all 824 test files. On a 16-co
 
 [   32.9s] Global α = 0.01; val MSE 3.002139
 [   38.2s] Done. 824 triplets in .../outputs/ridge_28spk_20261019_132348
-View: cd diagnostic_viewer && DATA_DIR=.../outputs docker compose up
+Score: make evaluate;  listen: make viewer  (from the project folder)
 ```
 
 ### 6.4 Common variations
@@ -199,7 +195,8 @@ python ridge_baseline.py --dataset "$DS" --skip-train \
 | `--sr HZ` | `16000` | Processing sample rate. All output wavs use this rate. |
 | `--n-fft N` | `512` | STFT window and FFT size (`n_fft/2 + 1` bins = number of Ridge models). |
 | `--hop N` | `128` | STFT hop size. |
-| `--workers N` | CPU count − 1 | Parallel processes for statistics and enhancement. |
+| `--workers N` | available cores − 1 | Parallel processes for statistics and enhancement. |
+| `--cache-dir DIR` | none | Read 16 kHz waveforms from the shared `speechprep` cache (identical to resampling, just faster on re-runs). |
 | `--limit-files N` | all | Use only the first N training pairs (sorted by name). |
 | `--test-limit N` | all (824) | Enhance only the first N test pairs. |
 | `--out DIR` | `linear_baseline/outputs` | Parent folder for run folders. Must not be inside the dataset. |
@@ -326,7 +323,7 @@ From these:
 
 ## 12. Reference results
 
-Measured on 2026-10-19: 16-core macOS, Python 3.13, dataset on an external RAID, default settings (`n_fft=512`, `hop=128`, `logspace(-6, 2, 17)` α grid, global α, ~10% held-out speakers with `--seed 0`).
+Measured with Python 3.13 and default settings (`n_fft=512`, `hop=128`, `logspace(-6, 2, 17)` α grid, global α, ~10% held-out speakers with `--seed 0`).
 
 ### 12.1 Training and α selection
 
@@ -336,7 +333,7 @@ Measured on 2026-10-19: 16-core macOS, Python 3.13, dataset on an external RAID,
 | `56spk` | 20,696 / 2,379 | p241, p272, p295, p299, p343, p363 | 0.01 | 5.916 → **2.686** | 400 s* |
 | `both` | 30,951 / 3,696 | p233, p270, p275, p287, p293, p298, p307, p308, p313 | 0.0316 | 5.967 → **2.667** | 176 s* |
 
-\*Mostly cold reads of the 56spk files from the external drive. The `both` run reused the OS file cache.
+\*Mostly first-time reads of the 56spk files. The `both` run reused the OS file cache. Run times depend on the machine and drive.
 
 Every sweep is shallow and U-shaped. Validation MSE is flat for α ≤ 10⁻³, reaches its minimum at α ≈ 0.01–0.03, and rises steeply above α ≈ 1. More training data lowers validation error, and the optimal α barely moves, which is what the per-frame α scaling (§10.4) is meant to achieve.
 
@@ -371,7 +368,7 @@ The log-magnitude error roughly halves, but these waveform metrics go *down*. Th
 - `--skip-train --model …/model.npz` reproduces the full run's enhanced wavs byte-for-byte.
 - `--per-bin-alpha` picks 10 distinct α values across the 257 bins (median 0.0316).
 - Invalid `--val-speakers` and `--out` inside the dataset both exit with a clear message, without creating a run folder.
-- After all runs, `find <dataset> -newermt 2026-10-19` returns 0 files. The dataset (70,943 files) was not modified.
+- After all runs, `find <dataset> -newer <run>/config.json` returns 0 files. The dataset (70,943 files) was not modified.
 
 ---
 
@@ -415,5 +412,5 @@ The suite uses synthetic data and needs no dataset:
 | Flat α sweep | Widen the grid, e.g. `--alphas 1e-8,1e-6,1e-4,1e-2,1,100,1e4`. |
 | Viewer shows ⚠ "missing processed" | Wrong `DATA_DIR`. Point it at `linear_baseline/outputs` or at a run folder, not the Valentini root. |
 | Viewer rejects a triplet over sample rate or length | Files were mixed from different runs or edited by hand. Re-run the baseline into a fresh `--run-name`. |
-| Slow on an external drive | Statistics collection is limited by reading files. Lower `--workers` if the drive is thrashing, or copy the dataset to a local SSD. |
+| Slow on a slow drive | Statistics collection is limited by reading files. Use `--cache-dir ../.cache/speechprep` so each file is read once, lower `--workers` if the drive is thrashing, or copy the dataset to a faster local disk. |
 | `RuntimeError` about `spawn` / `freeze_support` on Windows | Run the script as a file (`python ridge_baseline.py …`), not from an interactive session. |

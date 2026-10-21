@@ -79,13 +79,11 @@ valentini_noisy_speech_database/
 └── noisy_trainset_56spk_wav/   23 075 files
 ```
 
-On the project drive it is at:
+Keep it anywhere outside the repository and pass its path with `--dataset`, or set `VALENTINI_DIR`
+(section 4.4). The examples use `/path/to/valentini_noisy_speech_database` as a placeholder.
 
-```
-/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database
-```
-
-All files are **48 kHz, mono, 16-bit PCM WAV**. Noisy and clean files with the same name (e.g.
+All files are **48 kHz, mono, 16-bit PCM WAV**. The baseline resamples them to **16 kHz** on load (`--sr`,
+default 16000), the same rate every other model in the project uses. Noisy and clean files with the same name (e.g.
 `p232_001.wav`) are the same utterance and the same length in samples.
 
 The baseline **only reads** from this folder. `run_baseline.py` refuses to run if `--out` points
@@ -110,9 +108,8 @@ train splits only checks it at scale and gives a reference on the training data.
 ### 4.1 Get the code
 
 ```bash
-cd "/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/code/noisy_speech"
-git fetch
-git switch feature/wiener-baseline
+cd noisy_speech          # wherever you cloned the repository
+git pull
 ```
 
 ### 4.2 Python environment
@@ -142,7 +139,7 @@ install it separately.
 
 ```bash
 cd wiener_baseline
-python -m pytest tests -q          # expect: 7 passed
+python -m pytest tests -q          # expect: 9 passed
 ```
 
 ### 4.4 (Optional) Set the dataset path once
@@ -150,7 +147,7 @@ python -m pytest tests -q          # expect: 7 passed
 `run_baseline.py` reads the `VALENTINI_DIR` environment variable when `--dataset` is not given:
 
 ```bash
-export VALENTINI_DIR="/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database"
+export VALENTINI_DIR="/path/to/valentini_noisy_speech_database"
 ```
 
 The examples below assume this is set. If not, add `--dataset "$VALENTINI_DIR"` (or the path).
@@ -161,7 +158,7 @@ The examples below assume this is set. If not, add `--dataset "$VALENTINI_DIR"` 
 
 Run all commands from inside `wiener_baseline/`.
 
-### 5.1 Quick smoke test (10 files, ~1 s)
+### 5.1 Quick smoke test (10 files, a few seconds)
 
 ```bash
 python run_baseline.py --split test --limit 10 --run-name smoke
@@ -235,7 +232,8 @@ a time. `Y(t, f)` is the noisy spectrum, `S` the clean speech and `N` the noise.
 noisy wav ─► STFT Y ─► noise PSD N̂(f) ─► a-priori SNR ξ ─► gain G = ξ/(1+ξ) ─► Ŝ = G·Y ─► ISTFT ─► processed wav
 ```
 
-1. **STFT.** Hann window, 32 ms frames (1536 samples at 48 kHz), 75 % overlap (8 ms hop).
+1. **STFT.** Hann window, 32 ms frames (512 samples at 16 kHz), 75 % overlap (8 ms hop). Frame sizes are
+   set in milliseconds, so `--sr 0` (the files' own 48 kHz) gives 1536-sample frames with the same timing.
 
 2. **Noise power estimate `N̂`.**
    - **`leading`** (default) averages `|Y|²` over the first `noise_init_s` = 0.25 s. Valentini
@@ -296,27 +294,27 @@ Each run creates one folder:
 
 ```
 outputs/wiener_leading_test/
-├── clean/p232_001.wav        copy of the dataset file (unchanged)
-├── noisy/p232_001.wav        copy of the dataset file (unchanged)
+├── clean/p232_001.wav        dataset file resampled to 16 kHz
+├── noisy/p232_001.wav        dataset file resampled to 16 kHz
 ├── processed/p232_001.wav    Wiener output
 ├── ...
-├── params.json               method, split, dataset path, file count, git commit, all parameters
+├── params.json               method, split, dataset folder name, sample rate, file count, git commit, all parameters
 └── quick_metrics.csv         per file: snr_noisy, snr_processed, si_sdr_noisy, si_sdr_processed
 ```
 
 Guarantees for every `processed/` file, which the viewer's strict check needs:
 - the same file name as its clean and noisy partners,
-- the same sample rate (48 kHz), the same channel count (mono) and **the same length in samples**,
+- the same sample rate (16 kHz), the same channel count (mono) and **the same length in samples**,
 - values in [−1, 1], 16-bit PCM.
 
-The clean and noisy files are **copied**, not symlinked. The viewer's Docker container only sees the
+The clean and noisy files are **written** (resampled), not symlinked. The viewer's Docker container only sees the
 mounted folder, and can't follow symlinks that point outside it. The cost is disk space:
 
 | Split   | Files  | Approx. size per run folder |
 |---------|-------:|----------------------------:|
-| test    |    824 |                     ~0.6 GB |
-| train28 | 11 572 |                       ~9 GB |
-| train56 | 23 075 |                      ~19 GB |
+| test    |    824 |                     ~0.2 GB |
+| train28 | 11 572 |                       ~3 GB |
+| train56 | 23 075 |                     ~6.5 GB |
 
 Delete run folders you no longer need. They can always be regenerated.
 
@@ -391,7 +389,9 @@ parameters. SNR and SI-SDR are means over all files, from `quick_metrics.csv`.
 | train28 | Wiener, `leading`       | 11 572 |         6.00 |            11.13 |    +5.13 |      6.01 |         11.60 |    ~3 min |
 | train56 | Wiener, `leading`       | 23 075 |         5.93 |            11.02 |    +5.09 |      5.94 |         11.50 |  ~6.5 min |
 
-Run times are wall-clock on a 16-core Mac with the data on an external RAID, using `--jobs` 16.
+These numbers were measured at the original 48 kHz, before the switch to 16 kHz processing; re-run to
+refresh them. Run time depends on the machine: `--jobs` (default: every available core) sets how many files
+are processed at once, and `make pipeline` gives the baseline its share of the cores automatically.
 
 **Viewer compatibility.** The viewer's own discovery code (`viewer/dataset.py: discover`) was run
 against every output folder, comparing sample rate, channel count and length for each triplet:
@@ -437,8 +437,7 @@ To compare the neural network in the same viewer:
 
 1. Run the model on the noisy files (normally `noisy_testset_wav`).
 2. Write each output as `outputs/<your-run>/processed/<same stem>.wav`. It must have the same sample
-   rate, mono channel and **exact** length as the noisy input. If the model works at 16 kHz,
-   resample back to 48 kHz, or resample clean and noisy to match. The viewer will not do it for you.
+   rate (16 kHz), mono channel and **exact** length as the noisy input. The viewer will not resample for you.
 3. Put copies of the matching `clean/` and `noisy/` files next to it. The simplest way is to copy
    them from an existing Wiener run folder.
 4. Point the viewer at `outputs/` to compare `wiener_leading_test`, `oracle_test` and your run
@@ -507,7 +506,7 @@ The tests use synthetic harmonic "speech" bursts in white noise and check that:
 | Viewer shows "⚠ ... 2 candidates for processed" | The run folder contains two processed-type folders (e.g. `processed/` and `enhanced/`). Keep one |
 | Viewer: sample-rate / length mismatch | `processed/` files from some other tool don't match the clean and noisy files. Wiener output always matches |
 | Viewer in Docker shows no files | `DATA_DIR` path is wrong, or it relies on symlinks that point outside the mounted folder |
-| Run is slow on the train splits | It is limited by disk I/O on the external drive. `--jobs` above the core count won't help |
+| Run is slow on the train splits | It is limited by disk reads. Use `--cache-dir ../.cache/speechprep` so each file is read and resampled only once across all models. `--jobs` above the core count won't help |
 | macOS `._p232_001.wav` files | AppleDouble metadata files on non-APFS drives. Both the baseline and the viewer ignore them |
 
 ---

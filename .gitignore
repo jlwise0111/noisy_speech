@@ -3,3 +3,6 @@
 .cache/
 valentini_eda/
 .idea/
+logs/
+local.mk
+__pycache__/

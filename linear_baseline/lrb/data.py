@@ -1,6 +1,7 @@
 """Valentini dataset discovery, speaker splits and audio loading (read-only)."""
 
 import random
+import sys
 from math import gcd
 from pathlib import Path
 
@@ -13,6 +14,23 @@ TRAIN_SETS = {
     "56spk": ("clean_trainset_56spk_wav", "noisy_trainset_56spk_wav"),
 }
 TEST_SET = ("clean_testset_wav", "noisy_testset_wav")
+REPO = Path(__file__).resolve().parents[2]
+
+_cache = None  # shared speechprep.WaveCache for this process, set by use_cache()
+
+
+def use_cache(root, sr):
+    """Read audio through the project's shared waveform cache (speechprep.WaveCache) from now on.
+
+    Called once per worker process. The cache holds exactly what load_audio would return (the tests
+    check this), so it only saves re-reading and re-resampling the 48 kHz files. root=None turns it off."""
+    global _cache
+    if root is None:
+        _cache = None
+        return
+    sys.path.insert(0, str(REPO))
+    from speechprep import WaveCache
+    _cache = WaveCache(root, sr)
 
 
 def list_pairs(root, clean_dir, noisy_dir):
@@ -58,6 +76,8 @@ def split_by_speaker(pairs, val_speakers=None, val_frac=0.1, seed=0):
 
 def load_audio(path, sr):
     """Read a wav (read-only), downmix to mono, resample to `sr`. Returns float32."""
+    if _cache is not None and _cache.sr == sr:
+        return _cache.load(path)
     x, file_sr = sf.read(str(path), dtype="float32", always_2d=True)
     x = x.mean(axis=1)
     if file_sr != sr:

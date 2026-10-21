@@ -8,7 +8,8 @@ clean / noisy / processed triplets in the layout `diagnostic_viewer` reads.
 
 ## Algorithm
 
-All processing is done per STFT bin. Defaults: Hann window, 32 ms frames, 75% overlap.
+Audio is resampled from Valentini's 48 kHz to 16 kHz on load (`--sr`), the rate every model in the project
+uses. All processing is done per STFT bin. Defaults: Hann window, 32 ms frames (512 samples), 75% overlap.
 
 1. **Noise PSD estimate** `N(f)`
    - `leading` (default): mean power over the first 0.25 s. Valentini clips start with a short pause.
@@ -27,7 +28,7 @@ Requires numpy, scipy and soundfile (`pip install -r requirements.txt`).
 
 ```bash
 cd wiener_baseline
-DATA="/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database"
+DATA="/path/to/valentini_noisy_speech_database"     # or: export VALENTINI_DIR=...
 
 python run_baseline.py --dataset "$DATA" --split test --limit 10      # quick smoke run
 python run_baseline.py --dataset "$DATA" --split test                 # full 824-file test set
@@ -36,7 +37,10 @@ python run_baseline.py --dataset "$DATA" --split test --method oracle # upper bo
 ```
 
 - `--split`: `test`, `train28` or `train56`.
-- `--jobs`: number of parallel processes (default: all cores).
+- `--jobs`: number of parallel processes (default: every core available to the process).
+- `--sr`: processing and output sample rate (default 16000; `0` keeps the files' own rate).
+- `--cache-dir`: read 16 kHz waveforms from the shared `speechprep` cache (`../.cache/speechprep`) instead of
+  resampling each file again. `make pipeline` sets this.
 - Every `WienerParams` field can be set from the command line, e.g. `--gain-floor-db -15 --alpha 0.95`.
 - The dataset is only read. The script refuses to write inside it.
 
@@ -44,18 +48,18 @@ Output, which is gitignored:
 
 ```
 outputs/<method>_<noise-est>_<split>/
-    clean/<stem>.wav      copied from the dataset
-    noisy/<stem>.wav      copied from the dataset
-    processed/<stem>.wav  Wiener output: 48 kHz mono PCM_16, same length as noisy
+    clean/<stem>.wav      dataset file, resampled to 16 kHz
+    noisy/<stem>.wav      dataset file, resampled to 16 kHz
+    processed/<stem>.wav  Wiener output: 16 kHz mono PCM_16, same length as noisy
     params.json           settings + git commit
     quick_metrics.csv     per-file SNR / SI-SDR (numpy-only sanity check)
 ```
 
-A full test-set run copies the clean and noisy files, so each run folder takes about 550 MB.
+A full test-set run writes 16 kHz clean, noisy and processed files, about 200 MB per run folder.
 
 ## View in diagnostic_viewer
 
-The viewer lives on the `feature/diagnostic-viewer` branch. Set its sidebar data
+Run `make viewer` from the project folder, or set the viewer's sidebar data
 folder (or `DATA_DIR` for Docker) to one run folder, e.g. `wiener_baseline/outputs/wiener_leading_test`,
 and press **Rescan folder**. You can also point it at `outputs/` itself: the runs then show up as
 `wiener_leading_test/p232_001`, `oracle_test/p232_001`, and so on. Use the viewer's batch export for PESQ / STOI.
@@ -63,7 +67,7 @@ and press **Rescan folder**. You can also point it at `outputs/` itself: the run
 To compare the neural net later, write its outputs as `outputs/<nn-run>/processed/<stem>.wav`,
 next to copies of `clean/` and `noisy/`, in the same way.
 
-## Results: Valentini test set (824 files, from `quick_metrics.csv`)
+## Results: Valentini test set (824 files, from `quick_metrics.csv`, measured at 48 kHz; re-run to refresh at 16 kHz)
 
 | Method                     | SNR (dB) | SI-SDR (dB) | Δ SI-SDR |
 |----------------------------|---------:|------------:|---------:|
@@ -82,4 +86,5 @@ python -m pytest tests -q
 ```
 
 The tests use synthetic signals only: they check output length, gain bounds, SNR improvement,
-that the oracle beats the blind filter, that silent input stays finite, and that the output stays within [-1, 1].
+that the oracle beats the blind filter, that silent input stays finite, that the output stays within [-1, 1],
+and that 48 kHz input gives a 16 kHz clean / noisy / processed triplet.
