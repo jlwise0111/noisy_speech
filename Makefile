@@ -4,7 +4,7 @@
 #   make all        check → unit tests → build viewer → viewer tests → collect data → metrics → start viewer
 #   make train-evaluate   train/run every model, then score them all with the metric suite
 #   make pipeline   baselines in parallel → U-Net alone → score them all → open the viewer
-#   make pipeline-checked   unit tests → smoke pipeline → full pipeline, stopping at the first failure
+#   make pipeline-all       unit tests → smoke pipeline → full pipeline, stopping at the first failure
 #
 # The dataset path comes from DATASET, else $VALENTINI_DIR. Set it once per machine in an untracked
 # local.mk (one line: DATASET := /path/to/valentini_noisy_speech_database), or on the command line:
@@ -40,7 +40,7 @@ already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exi
 .DEFAULT_GOAL := help
 .PHONY: help all check check-python check-docker check-dataset \
         test test-linear test-wiener test-viewer test-metrics test-unet metrics-venv unet-venv evaluate train-evaluate \
-        data-unet unet-smoke unet-all pipeline pipeline-smoke pipeline-checked \
+        data-unet unet-smoke unet-all pipeline pipeline-smoke pipeline-all \
         data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
         data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
         smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open status clean
@@ -190,7 +190,7 @@ pipeline-smoke: unet-venv metrics-venv check-dataset ## The pipeline on a few fi
 
 # Each step is its own make run, one after another; make stops at the first one that fails, so the
 # hours-long pipeline only starts once the tests and the smoke pipeline have passed.
-pipeline-checked: ## Unit tests → smoke pipeline → full pipeline; stops at the first failure
+pipeline-all: ## Unit tests → smoke pipeline → full pipeline; stops at the first failure
 	$(MAKE) test
 	$(MAKE) pipeline-smoke
 	$(MAKE) pipeline
