@@ -50,4 +50,6 @@ Tell make where the dataset is with `make … DATASET=/path/to/valentini_noisy_s
 
 Finished runs are skipped and an interrupted U-Net run resumes, so re-running is safe; `FORCE=1` redoes
 everything. Progress is printed as jobs start and finish; each job's full output is in `logs/<run>.log`.
-`make pipeline-smoke` runs the same thing on a few files in a few minutes.
+`make pipeline-smoke` runs the same thing on a few files in about a minute (always redone, never skipped).
+`make pipeline-checked` runs the unit tests, then the smoke pipeline, then the full pipeline, and stops at the
+first step that fails; `make pipeline-checked FORCE=1` retrains everything once the checks pass.
