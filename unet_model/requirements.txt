@@ -1,0 +1,6 @@
+# torch 2.2.2 is the last release with Intel-Mac wheels; it needs numpy < 2.
+torch==2.2.2
+numpy==1.26.4
+scipy==1.13.1
+soundfile==0.13.1
+pytest==8.3.3
