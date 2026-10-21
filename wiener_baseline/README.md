@@ -66,17 +66,20 @@ and press **Rescan folder**. You can also point it at `outputs/` itself: the run
 To compare the neural net later, write its outputs as `outputs/<nn-run>/processed/<stem>.wav`,
 next to copies of `clean/` and `noisy/`, in the same way.
 
-## Results: Valentini test set (824 files, from `quick_metrics.csv`, measured at 48 kHz; re-run to refresh at 16 kHz)
+## Results: Valentini test set (824 files, 16 kHz)
 
-| Method                     | SNR (dB) | SI-SDR (dB) | Δ SI-SDR |
-|----------------------------|---------:|------------:|---------:|
-| Noisy input                |     8.39 |        8.39 |        — |
-| Wiener, `leading` noise    |    15.91 |       15.76 |    +7.36 |
-| Wiener, `minstats` noise   |    13.24 |       13.03 |    +4.64 |
-| Oracle Wiener (upper bound)|    21.05 |       21.01 |   +12.61 |
+SNR and SI-SDR are from `quick_metrics.csv`; PESQ-WB and STOI are from `make evaluate`
+(`metric_suite/results/summary.md`).
 
-Train splits (Wiener, `leading`): train28 SI-SDR 6.00 → 11.13 dB (+5.13, 11 572 files);
-train56 5.93 → 11.02 dB (+5.09, 23 075 files). See the guide, section 9, for details.
+| Method                     | SNR (dB) | SI-SDR (dB) | Δ SI-SDR | PESQ-WB | STOI  |
+|----------------------------|---------:|------------:|---------:|--------:|------:|
+| Noisy input                |     8.45 |        8.45 |        — |    1.97 | 0.921 |
+| Wiener, `leading` noise    |    16.01 |       15.86 |    +7.41 |    2.42 | 0.912 |
+| Wiener, `minstats` noise   |    13.32 |       13.12 |    +4.67 |    2.31 | 0.908 |
+| Oracle Wiener (upper bound)|    21.08 |       21.04 |   +12.59 |    3.84 | 0.982 |
+
+Train splits (Wiener, `leading`): train28 SI-SDR 6.12 → 11.26 dB (+5.14, 11 572 files);
+train56 6.04 → 11.14 dB (+5.10, 23 075 files). See the guide, section 9, for details.
 
 ## Tests
 
@@ -86,4 +89,5 @@ python -m pytest tests -q
 
 The tests use synthetic signals only: they check output length, gain bounds, SNR improvement,
 that the oracle beats the blind filter, that silent input stays finite, that the output stays within [-1, 1],
-and that 48 kHz input gives a 16 kHz clean / noisy / processed triplet.
+that the filter refuses audio at any rate other than 16 kHz, and that 48 kHz input gives a 16 kHz
+clean / noisy / processed triplet.

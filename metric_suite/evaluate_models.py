@@ -43,7 +43,7 @@ def parse_args(argv=None):
 
 
 def shown_root(root: Path) -> str:
-    """The search root as printed in reports: relative to the project folder, never an absolute path."""
+    """A folder as printed in reports and on screen: relative to the project folder, never an absolute path."""
     root, project = root.resolve(), HERE.parent.resolve()
     if root == project:
         return "the project folder"
@@ -58,7 +58,7 @@ def main(argv=None) -> int:
     t0 = time.time()
     found = runs.find_runs(args.root, args.include, args.exclude or None)
     if not found:
-        print(f"No runs found under {args.root} (include={args.include!r}, exclude={args.exclude!r}).")
+        print(f"No runs found under {shown_root(args.root)} (include={args.include!r}, exclude={args.exclude!r}).")
         return 1
     print(f"Found {len(found)} run(s) under {shown_root(args.root)}:")
     args.out.mkdir(parents=True, exist_ok=True)
@@ -74,8 +74,9 @@ def main(argv=None) -> int:
         evaluate.markdown_report(summaries, args.ref_pesq, args.ref_stoi, shown_root(args.root)))
     print()
     print(evaluate.terminal_table(summaries, args.ref_pesq, args.ref_stoi))
-    print(f"\nWrote {args.out / 'summary.md'}, {args.out / 'summary.csv'} and per-file CSVs in "
-          f"{args.out / 'runs'} ({time.time() - t0:.0f} s)")
+    out = shown_root(args.out)
+    print(f"\nWrote {out}/summary.md, {out}/summary.csv and per-file CSVs in "
+          f"{out}/runs ({time.time() - t0:.0f} s)")
     return 0
 
 

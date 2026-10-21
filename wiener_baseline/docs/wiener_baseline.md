@@ -377,32 +377,39 @@ Things to look at:
 
 ## 9. Verified results
 
-All numbers below are from runs on the full Valentini dataset (all three splits) with default
+All numbers below are from runs on the full Valentini dataset (all three splits) at 16 kHz with default
 parameters. SNR and SI-SDR are means over all files, from `quick_metrics.csv`.
 
 | Split   | Method                  | Files  | Noisy SI-SDR | Processed SI-SDR | Δ SI-SDR | Noisy SNR | Processed SNR | Run time |
 |---------|-------------------------|-------:|-------------:|-----------------:|---------:|----------:|--------------:|---------:|
-| test    | Wiener, `leading`       |    824 |         8.39 |            15.76 |    +7.36 |      8.39 |         15.91 |      ~8 s |
-| test    | Wiener, `minstats`      |    824 |         8.39 |            13.03 |    +4.64 |      8.39 |         13.24 |      ~8 s |
-| test    | Oracle Wiener           |    824 |         8.39 |            21.01 |   +12.61 |      8.39 |         21.05 |      ~8 s |
-| train28 | Wiener, `leading`       | 11 572 |         6.00 |            11.13 |    +5.13 |      6.01 |         11.60 |    ~3 min |
-| train56 | Wiener, `leading`       | 23 075 |         5.93 |            11.02 |    +5.09 |      5.94 |         11.50 |  ~6.5 min |
+| test    | Wiener, `leading`       |    824 |         8.45 |            15.86 |    +7.41 |      8.45 |         16.01 |      ~3 s |
+| test    | Wiener, `minstats`      |    824 |         8.45 |            13.12 |    +4.67 |      8.45 |         13.32 |      ~3 s |
+| test    | Oracle Wiener           |    824 |         8.45 |            21.04 |   +12.59 |      8.45 |         21.08 |      ~3 s |
+| train28 | Wiener, `leading`       | 11 572 |         6.12 |            11.26 |    +5.14 |      6.13 |         11.72 |   ~70 s |
+| train56 | Wiener, `leading`       | 23 075 |         6.04 |            11.14 |    +5.10 |      6.04 |         11.61 |  ~2.5 min |
 
-These numbers were measured at the original 48 kHz, before the switch to 16 kHz processing; re-run to
-refresh them. Run time depends on the machine: `--jobs` (default: every available core) sets how many files
-are processed at once, and `make pipeline` gives the baseline its share of the cores automatically.
+Run times are with a warm `--cache-dir` and are only a rough guide: they depend on the machine. `--jobs`
+(default: every available core) sets how many files are processed at once, and `make pipeline` gives the
+baseline its share of the cores automatically. The numbers differ slightly from the earlier 48 kHz runs
+(e.g. test `leading` +7.36 dB then, +7.41 dB now) because the metrics are now computed on 16 kHz audio.
+
+PESQ-WB and STOI on the test set, from `make evaluate`: noisy 1.97 / 0.921, `leading` 2.42 / 0.912,
+`minstats` 2.31 / 0.908, oracle 3.84 / 0.982. The blind filters raise PESQ but lower STOI slightly:
+removing noise also removes some of the speech detail that intelligibility depends on.
 
 **Viewer compatibility.** The viewer's own discovery code (`viewer/dataset.py: discover`) was run
-against every output folder, comparing sample rate, channel count and length for each triplet:
+against every output folder, comparing sample rate (all 16 kHz) and length for each triplet:
 
 | Run                      | Triplets found | Resolved | SR/length mismatches | NaN/Inf metrics |
 |--------------------------|---------------:|---------:|---------------------:|----------------:|
 | `wiener_leading_test`    |            824 |      824 |                    0 |               0 |
+| `wiener_minstats_test`   |            824 |      824 |                    0 |               0 |
+| `oracle_test`            |            824 |      824 |                    0 |               0 |
 | `wiener_leading_train28` |         11 572 |   11 572 |                    0 |               0 |
 | `wiener_leading_train56` |         23 075 |   23 075 |                    0 |               0 |
 
 **Why the train splits score lower than test.** The train sets were mixed at harder SNRs
-(0–15 dB) than the test set (2.5–17.5 dB): the mean input SNR is about 6 dB, against 8.4 dB for test.
+(0–15 dB) than the test set (2.5–17.5 dB): the mean input SNR is about 6 dB, against 8.5 dB for test.
 Even so, the filter gives a solid +5 dB SI-SDR on both train sets, and the 28- and 56-speaker
 results are almost the same. That is expected, because the filter has no training data to depend on.
 
@@ -410,9 +417,9 @@ results are almost the same. That is expected, because the filter has no trainin
 
 | Split   | Files worse than noisy | Median input SI-SDR of those files (vs. whole split) |
 |---------|-----------------------:|-----------------------------------------------------:|
-| test    |       6 / 824 (0.7 %)  | 16.4 dB (vs. 7.2 dB)                                 |
-| train28 |  344 / 11 572 (3.0 %)  | 13.2 dB (vs. 5.9 dB)                                 |
-| train56 |  908 / 23 075 (3.9 %)  | 13.5 dB (vs. 5.0 dB)                                 |
+| test    |       7 / 824 (0.8 %)  | 16.5 dB (vs. 7.4 dB)                                 |
+| train28 |  355 / 11 572 (3.1 %)  | 13.4 dB (vs. 6.6 dB)                                 |
+| train56 |  949 / 23 075 (4.1 %)  | 13.6 dB (vs. 6.5 dB)                                 |
 
 They are mostly **already-clean inputs**: there is little noise to remove, so any speech the
 filter removes costs more than the noise it removes. The rest are usually clips where speech starts
@@ -421,9 +428,9 @@ changes partway through. The average gain falls as the input gets cleaner (test 
 
 | Input SI-SDR | Files | Mean Δ SI-SDR |
 |--------------|------:|--------------:|
-| < 5 dB       |   218 |         +9.54 |
-| 5–12 dB      |   400 |         +7.62 |
-| > 12 dB      |   206 |         +4.55 |
+| < 5 dB       |   218 |         +9.59 |
+| 5–12 dB      |   400 |         +7.67 |
+| > 12 dB      |   206 |         +4.58 |
 
 These are exactly the cases a learned model should handle better. Sort `quick_metrics.csv` by
 `si_sdr_processed − si_sdr_noisy` to find them and open them in the viewer.
@@ -452,13 +459,14 @@ Two of them in the same parent make the viewer flag the triplet as ambiguous (�
 ```python
 import soundfile as sf
 from wiener import wiener_filter, wiener_oracle, WienerParams   # run from wiener_baseline/
+from wiener.audio_io import read_wav                             # mono float32, resampled to 16 kHz
 
-noisy, sr = sf.read("noisy.wav", dtype="float32")
+noisy, sr = read_wav("noisy.wav")                                    # sr is always 16000
 enhanced = wiener_filter(noisy, sr)                                  # default: leading noise estimate
 gentler  = wiener_filter(noisy, sr, "leading", WienerParams(gain_floor_db=-12))
 tracked  = wiener_filter(noisy, sr, noise_method="minstats")
 
-clean, _ = sf.read("clean.wav", dtype="float32")
+clean, _ = read_wav("clean.wav")
 ceiling  = wiener_oracle(noisy, clean, sr)
 
 sf.write("enhanced.wav", enhanced, sr, subtype="PCM_16")
@@ -489,7 +497,9 @@ The tests use synthetic harmonic "speech" bursts in white noise and check that:
 - SNR improves by more than 3 dB with both noise estimators,
 - the oracle beats the blind filter,
 - silent input gives finite (zero) output,
-- the output stays within [−1, 1] even for loud input.
+- the output stays within [−1, 1] even for loud input,
+- the filter refuses audio at any rate other than 16 kHz,
+- 48 kHz input gives a 16 kHz clean / noisy / processed triplet of matching length.
 
 ---
 
@@ -501,6 +511,7 @@ The tests use synthetic harmonic "speech" bursts in white noise and check that:
 | `missing dataset folder: ...noisy_trainset_28spk_wav` | Wrong dataset root, or that split wasn't downloaded or unzipped |
 | `warning: N unmatched file(s) skipped` | A noisy file has no clean partner (or the reverse). Only matched pairs are processed |
 | `noisy/clean mismatch` error | A pair has a different sample rate or length. The Valentini originals never do, so check the files aren't corrupted |
+| `the Wiener filter runs at 16000 Hz only` | You passed audio at another rate to `wiener_filter` / `wiener_oracle`. Load it with `wiener.audio_io.read_wav`, which resamples to 16 kHz |
 | `refusing to write inside the dataset folder` | `--out` points into the dataset. Choose another folder |
 | Viewer shows "⚠ ... 2 candidates for processed" | The run folder contains two processed-type folders (e.g. `processed/` and `enhanced/`). Keep one |
 | Viewer: sample-rate / length mismatch | `processed/` files from some other tool don't match the clean and noisy files. Wiener output always matches |

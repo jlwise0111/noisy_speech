@@ -132,7 +132,7 @@ data-wiener-oracle: check-dataset
 	@$(call already_ran,$(WIENER)/outputs/oracle_test/quick_metrics.csv) || \
 	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split test --method oracle)
 
-data-wiener-train: check-dataset ## Optional: Wiener on the train28/train56 splits (~25 GB, not part of 'all')
+data-wiener-train: check-dataset ## Optional: Wiener on the train28/train56 splits (~10 GB at 16 kHz, not part of 'all')
 	@$(call already_ran,$(WIENER)/outputs/wiener_leading_train28/quick_metrics.csv) || \
 	  (cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split train28)
 	@$(call already_ran,$(WIENER)/outputs/wiener_leading_train56/quick_metrics.csv) || \
