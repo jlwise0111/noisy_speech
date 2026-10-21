@@ -1,2 +1,5 @@
 .DS_Store
 ._*
+.cache/
+valentini_eda/
+.idea/

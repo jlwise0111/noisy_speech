@@ -22,6 +22,9 @@ LINEAR  := linear_baseline
 WIENER  := wiener_baseline
 VIEWER  := diagnostic_viewer
 METRICS := metric_suite
+UNET    := unet_model
+UNET_PY := .venv/bin/python
+UNET_ARGS ?=
 METRICS_PY := .venv/bin/python
 METRIC_ARGS ?=
 COMPOSE := cd $(VIEWER) && PORT=$(PORT) docker compose
@@ -31,7 +34,8 @@ already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exi
 
 .DEFAULT_GOAL := help
 .PHONY: help all check check-python check-docker check-dataset \
-        test test-linear test-wiener test-viewer test-metrics metrics-venv evaluate train-evaluate \
+        test test-linear test-wiener test-viewer test-metrics test-unet metrics-venv unet-venv evaluate train-evaluate \
+        data-unet unet-smoke unet-all \
         data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
         data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
         smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open status clean
@@ -68,7 +72,7 @@ check-dataset:
 	done; echo "  ✓ Valentini dataset found"
 
 # ---------------------------------------------------------------------------- tests (each runs on its own)
-test: test-linear test-wiener test-metrics test-viewer ## Run all four test suites
+test: test-linear test-wiener test-metrics test-unet test-viewer ## Run all five test suites
 
 test-linear: check-python ## Ridge baseline unit tests (host Python)
 	@echo "▶ $(LINEAR) tests"
@@ -81,6 +85,10 @@ test-wiener: check-python ## Wiener baseline unit tests (host Python)
 test-metrics: metrics-venv ## Metric suite unit tests (its own .venv)
 	@echo "▶ $(METRICS) tests"
 	cd $(METRICS) && $(METRICS_PY) -m pytest -q -p no:cacheprovider
+
+test-unet: unet-venv ## U-Net + shared preprocessing tests (its own .venv with PyTorch)
+	@echo "▶ $(UNET) tests"
+	cd $(UNET) && $(UNET_PY) -m pytest -q -p no:cacheprovider
 
 test-viewer: viewer-build ## Viewer tests, inside the freshly built Docker image
 	@echo "▶ $(VIEWER) tests (in Docker)"
@@ -128,6 +136,37 @@ smoke: check-dataset ## Quick end-to-end check of both baselines on a few files 
 	cd $(LINEAR) && $(PYTHON) ridge_baseline.py --dataset "$(DATASET)" --limit-files 500 --test-limit 5 --run-name smoke
 	cd $(WIENER) && $(PYTHON) run_baseline.py --dataset "$(DATASET)" --split test --limit 5 --run-name smoke
 
+# ---------------------------------------------------------------------------- U-Net (Person B)
+# PyTorch lives in unet_model/.venv. Training takes hours, so data-unet is not part of 'data' or 'all'.
+unet-venv: check-python
+	@test -x "$(UNET)/$(UNET_PY)" || { echo "  creating $(UNET)/.venv (downloads PyTorch)"; \
+	  cd $(UNET) && $(PYTHON) -m venv .venv && $(UNET_PY) -m pip install -q -r requirements.txt; }
+
+# train_unet.py writes config.json before training starts and adds "seconds" only when the whole
+# run (training + test enhancement) has finished, so that key, not the file, marks a finished run.
+# An unfinished run continues from last.pt (--resume); FORCE=1 starts over.
+UNET_RUN := unet_28spk
+data-unet: unet-venv check-dataset ## Train the U-Net on 28spk and enhance the test set (hours; resumes if interrupted)
+	@if test -z "$(FORCE)" && grep -qs '"seconds"' "$(UNET)/outputs/$(UNET_RUN)/config.json"; then \
+	  echo "  ✓ skip: $(UNET)/outputs/$(UNET_RUN) is a finished run (FORCE=1 to redo)"; \
+	elif pgrep -f -- "--run-name $(UNET_RUN)( |$$)" >/dev/null; then \
+	  echo "  ✗ $(UNET_RUN) is already training (see $(UNET)/$(UNET_RUN).log); not starting a second copy"; exit 1; \
+	else \
+	  cd $(UNET) && $(UNET_PY) -u train_unet.py --dataset "$(DATASET)" --train-set 28spk --run-name $(UNET_RUN) \
+	    $(if $(FORCE),,--resume) $(UNET_ARGS); \
+	fi
+
+# Each step is a bigger commitment than the last, so a problem shows up at the cheapest step that
+# can catch it. Sub-makes (not prerequisites) keep the order fixed even under make -j.
+unet-all: ## U-Net in order: venv → tests → smoke run → full training (hours) → score it
+	$(MAKE) test-unet
+	$(MAKE) unet-smoke
+	$(MAKE) data-unet
+	$(MAKE) evaluate METRIC_ARGS="--include $(UNET_RUN)"
+
+unet-smoke: unet-venv check-dataset ## U-Net end to end on 300 files, 2 epochs (~3 min)
+	cd $(UNET) && $(UNET_PY) train_unet.py --dataset "$(DATASET)" --limit-files 300 --epochs 2 --test-limit 20 --run-name unet_smoke
+
 # ---------------------------------------------------------------------------- metric suite
 # PESQ/STOI live in metric_suite/.venv so the main Python environment is left alone.
 metrics-venv: check-python
@@ -169,7 +208,7 @@ viewer-open: ## Open the viewer in the default browser
 
 # ---------------------------------------------------------------------------- housekeeping
 status: ## List collected runs (files per run) and git branches
-	@for d in $(LINEAR)/outputs/* $(WIENER)/outputs/*; do \
+	@for d in $(LINEAR)/outputs/* $(WIENER)/outputs/* $(UNET)/outputs/*; do \
 	  [ -d "$$d" ] || continue; \
 	  n=$$(ls "$$d"/enhanced "$$d"/processed 2>/dev/null | grep -c '\.wav$$'); \
 	  printf "  %-45s %6s files\n" "$$d" "$$n"; done
