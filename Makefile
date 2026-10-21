@@ -35,7 +35,7 @@ already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exi
 .DEFAULT_GOAL := help
 .PHONY: help all check check-python check-docker check-dataset \
         test test-linear test-wiener test-viewer test-metrics test-unet metrics-venv unet-venv evaluate train-evaluate \
-        data-unet unet-smoke \
+        data-unet unet-smoke unet-all \
         data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
         data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
         smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open status clean
@@ -155,6 +155,14 @@ data-unet: unet-venv check-dataset ## Train the U-Net on 28spk and enhance the t
 	  cd $(UNET) && $(UNET_PY) -u train_unet.py --dataset "$(DATASET)" --train-set 28spk --run-name $(UNET_RUN) \
 	    $(if $(FORCE),,--resume) $(UNET_ARGS); \
 	fi
+
+# Each step is a bigger commitment than the last, so a problem shows up at the cheapest step that
+# can catch it. Sub-makes (not prerequisites) keep the order fixed even under make -j.
+unet-all: ## U-Net in order: venv → tests → smoke run → full training (hours) → score it
+	$(MAKE) test-unet
+	$(MAKE) unet-smoke
+	$(MAKE) data-unet
+	$(MAKE) evaluate METRIC_ARGS="--include $(UNET_RUN)"
 
 unet-smoke: unet-venv check-dataset ## U-Net end to end on 300 files, 2 epochs (~3 min)
 	cd $(UNET) && $(UNET_PY) train_unet.py --dataset "$(DATASET)" --limit-files 300 --epochs 2 --test-limit 20 --run-name unet_smoke
