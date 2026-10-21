@@ -3,7 +3,7 @@
 #   make            show this help
 #   make all        check → unit tests → build viewer → viewer tests → collect data → metrics → start viewer
 #   make train-evaluate   train/run every model, then score them all with the metric suite
-#   make pipeline   baselines in parallel → U-Net alone → score them all → open the viewer
+#   make pipeline   baselines in parallel → U-Nets (28spk, 56spk, both) one by one → score all → open the viewer
 #   make pipeline-all       unit tests → smoke pipeline → full pipeline, stopping at the first failure
 #
 # The dataset path comes from DATASET, else $VALENTINI_DIR. Set it once per machine in an untracked
@@ -179,13 +179,13 @@ unet-smoke: unet-venv check-dataset ## U-Net end to end on 300 files, 2 epochs (
 # then the U-Net alone with every core, all within the core budget Python detects
 # (PIPELINE_ARGS="--cores N" to change it), then one scoring pass, then the viewer.
 # Finished runs are skipped; FORCE=1 redoes them. Logs go to logs/<run>.log.
-pipeline: unet-venv metrics-venv check-dataset ## Baselines in parallel → U-Net alone → score all → open the viewer
-	@if pgrep -f -- "--run-name $(UNET_RUN)( |$$)" >/dev/null; then \
-	  echo "  ✗ $(UNET_RUN) is already training; not starting a second pipeline"; exit 1; fi
+pipeline: unet-venv metrics-venv check-dataset ## Baselines in parallel → 3 U-Nets one by one → score all → viewer
+	@if pgrep -f -- "--run-name unet_(28spk|56spk|both)( |$$)" >/dev/null; then \
+	  echo "  ✗ a U-Net run is already training; not starting a second pipeline"; exit 1; fi
 	$(PYTHON) run_pipeline.py --dataset "$(DATASET)" --port $(PORT) $(if $(FORCE),--force) $(PIPELINE_ARGS)
 
 # Smoke runs are throwaway, so they are always redone: skipping them would test nothing.
-pipeline-smoke: unet-venv metrics-venv check-dataset ## The pipeline on a few files (smoke_* runs, ~1 min, no viewer)
+pipeline-smoke: unet-venv metrics-venv check-dataset ## The pipeline on a few files (smoke_* runs, ~2 min, no viewer)
 	$(PYTHON) run_pipeline.py --dataset "$(DATASET)" --smoke --skip-viewer --force $(PIPELINE_ARGS)
 
 # Each step is its own make run, one after another; make stops at the first one that fails, so the

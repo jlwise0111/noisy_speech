@@ -10,8 +10,8 @@ Phases:
                  re-reads the dataset drive and none of them resamples the same file again
     3. baselines Ridge (28spk / 56spk / both) and Wiener (leading / minstats / oracle) run side by side,
                  sharing the whole core budget
-    4. U-Net     trains alone afterwards with every core: PyTorch fixes its thread count when it starts,
-                 so it only gets the whole machine if nothing else is running
+    4. U-Net     unet_28spk, unet_56spk, then unet_both, one at a time with every core: PyTorch fixes its
+                 thread count when it starts, so a U-Net only gets the whole machine if nothing else runs
     5. evaluate  the metric suite scores every run in one shared process pool
     6. viewer    docker compose up, wait for the health check, open the browser
 
@@ -42,7 +42,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
 LOGS = REPO / "logs"
-UNET_RUN = "unet_28spk"
+TRAIN_SETS = ("28spk", "56spk", "both")   # one U-Net and one Ridge run per training set
 HEARTBEAT_S = 300               # how often to print the latest log line of each running job
 
 # Pin every BLAS / OpenMP pool to one thread inside child processes. Parallelism comes from the worker
@@ -119,26 +119,18 @@ def build_jobs(args) -> list[Job]:
     test = ("clean_testset_wav", "noisy_testset_wav")
     spk = {s: (f"clean_trainset_{s}_wav", f"noisy_trainset_{s}_wav") for s in ("28spk", "56spk")}
 
-    unet_name = prefix + UNET_RUN
-    unet_cfg = unet_dir / "outputs" / unet_name / "config.json"
-    unet_cmd = [str(venv_python(unet_dir)), "-u", "train_unet.py", "--dataset", ds, "--train-set", "28spk",
-                "--run-name", unet_name, "--cache-dir", cache, *unet_par]
-    if args.smoke:
-        unet_cmd += ["--limit-files", "300", "--epochs", "2", "--test-limit", "20"]
-    if not args.force:
-        unet_cmd.append("--resume")
-    unet_cmd += shlex.split(args.unet_args)
-    jobs = []
+    def needs(train_set):
+        return (spk["28spk"] + spk["56spk"] if train_set == "both" else spk[train_set]) + test
 
-    for train_set in ("28spk", "56spk", "both"):
+    jobs = []
+    for train_set in TRAIN_SETS:
         name = f"{prefix}ridge_{train_set}"
         marker = linear / "outputs" / name / "config.json"
         cmd = [py, "-u", "ridge_baseline.py", "--dataset", ds, "--train-set", train_set, "--run-name", name,
                "--workers", str(base_cores), "--cache-dir", cache]
         if args.smoke:
             cmd += ["--limit-files", "500", "--test-limit", "20"]
-        needs = (spk["28spk"] + spk["56spk"] if train_set == "both" else spk[train_set]) + test
-        jobs.append(Job(name, linear, cmd, base_cores, marker.exists, needs))
+        jobs.append(Job(name, linear, cmd, base_cores, marker.exists, needs(train_set)))
 
     for name, extra in (("wiener_leading_test", ["--noise-est", "leading"]),
                         ("wiener_minstats_test", ["--noise-est", "minstats"]),
@@ -151,9 +143,20 @@ def build_jobs(args) -> list[Job]:
             cmd += ["--limit", "20"]
         jobs.append(Job(name, wiener, cmd, base_cores, marker.exists, test))
 
-    jobs.append(Job(unet_name, unet_dir, unet_cmd, cores,
-                    lambda: unet_cfg.exists() and '"seconds"' in unet_cfg.read_text(), spk["28spk"] + test,
-                    stage="U-Net"))
+    # Each U-Net asks for the whole budget, so they train one after another, smallest training set first.
+    for train_set in TRAIN_SETS:
+        name = f"{prefix}unet_{train_set}"
+        cfg = unet_dir / "outputs" / name / "config.json"
+        cmd = [str(venv_python(unet_dir)), "-u", "train_unet.py", "--dataset", ds, "--train-set", train_set,
+               "--run-name", name, "--cache-dir", cache, *unet_par]
+        if args.smoke:
+            cmd += ["--limit-files", "300", "--epochs", "2", "--test-limit", "20"]
+        if not args.force:
+            cmd.append("--resume")
+        cmd += shlex.split(args.unet_args)
+        jobs.append(Job(name, unet_dir, cmd, cores,
+                        lambda cfg=cfg: cfg.exists() and '"seconds"' in cfg.read_text(), needs(train_set),
+                        stage="U-Net"))
 
     if args.only:
         jobs = [j for j in jobs if re.search(args.only, j.name)]

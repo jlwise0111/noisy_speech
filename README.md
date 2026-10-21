@@ -42,7 +42,8 @@ Tell make where the dataset is with `make … DATASET=/path/to/valentini_noisy_s
    Each gets a share of the cores Python detects (`PIPELINE_ARGS="--cores N"` to override) as its worker
    count, and BLAS / OpenMP pools are pinned to one thread per process, so the jobs never ask for more
    cores than there are.
-3. The U-Net then trains on its own with every core, split between data-loader workers and PyTorch
+3. The U-Net then trains three times, on 28spk, 56spk and both (`unet_28spk`, `unet_56spk`, `unet_both`),
+   one run after another, each on its own with every core, split between data-loader workers and PyTorch
    threads. PyTorch fixes its thread count at start-up, so running it alone is what lets it use the whole
    machine. No GPU is needed; it uses one only if PyTorch finds it.
 4. The metric suite scores all runs in one shared process pool (`metric_suite/results/summary.md`).
@@ -50,6 +51,6 @@ Tell make where the dataset is with `make … DATASET=/path/to/valentini_noisy_s
 
 Finished runs are skipped and an interrupted U-Net run resumes, so re-running is safe; `FORCE=1` redoes
 everything. Progress is printed as jobs start and finish; each job's full output is in `logs/<run>.log`.
-`make pipeline-smoke` runs the same thing on a few files in about a minute (always redone, never skipped).
+`make pipeline-smoke` runs the same thing on a few files in about two minutes (always redone, never skipped).
 `make pipeline-all` runs the unit tests, then the smoke pipeline, then the full pipeline, and stops at the
 first step that fails; `make pipeline-all FORCE=1` retrains everything once the checks pass.
