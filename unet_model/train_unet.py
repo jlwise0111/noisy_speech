@@ -174,7 +174,6 @@ def train_model(train_ds, val_ds, norm, cfg, run_dir: Path, resume: bool, info: 
 
     checkpoint = fit(train_ds, val_ds, norm, cfg, run_dir, resume=resume)
     best = torch.load(checkpoint, map_location="cpu")
-    info["best_epoch"] = best["epoch"]
     info.update(best_epoch=best["epoch"], **{k: best[k] for k in best if k.startswith("val_")})
     print(f"best checkpoint: epoch {best['epoch']}, val_loss {best['val_loss']:.5f}")
 
@@ -189,7 +188,8 @@ def enhance_test(checkpoint: Path, test, cache, run_dir: Path, cfg, info: dict) 
 
     device = pick_device(cfg.device)
     model = load_model(checkpoint, device)
-    info["checkpoint"] = str(checkpoint); info["n_parameters"] = n_parameters(model)
+    info["checkpoint"] = str(checkpoint)
+    info["n_parameters"] = n_parameters(model)
     enhance_pairs(model, test, cache, run_dir, device)
     info["n_test"] = len(test)
 
@@ -205,7 +205,8 @@ def main(argv=None):
 
     `argv=None` means "use the real command line"; the test passes its own list instead."""
 
-    args = parse_args(argv); check_paths(args)
+    args = parse_args(argv)
+    check_paths(args)
     cfg = TrainConfig(**{f.name: getattr(args, f.name) for f in dataclasses.fields(TrainConfig)})
     run_name = args.run_name or f"unet_{args.train_set}_{time.strftime('%Y%m%d_%H%M%S')}"
     run_dir = args.out / run_name
@@ -238,7 +239,7 @@ def main(argv=None):
     info["seconds"] = round(time.time() - t_start, 1)
     run_dir.mkdir(parents=True, exist_ok=True)
     write_json(run_dir / "config.json", info)
-    print(f'done in {info["seconds"]:.0f}s. Score with: make evaluate METRIC_ARGS="--include{run_name}"')
+    print(f'done in {info["seconds"]:.0f}s. Score with: make evaluate METRIC_ARGS="--include {run_name}"')
 
 
 if __name__ == "__main__":

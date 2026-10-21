@@ -5,3 +5,4 @@ outputs/*
 !outputs/.gitkeep
 __pycache__/
 .pytest_cache/
+*.log
