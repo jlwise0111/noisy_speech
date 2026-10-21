@@ -52,4 +52,5 @@ tuned to one machine:
 | `--prefetch-factor` | `4` | batches each worker keeps ready |
 
 Workers + threads never exceed the core count, so the loaders and the model do not fight for the CPU. The
-project pipeline (`make pipeline`) passes explicit values so the U-Net can share the machine with the baselines.
+project pipeline (`make pipeline`) runs the baselines first, then trains `unet_28spk`, `unet_56spk` and
+`unet_both` one after another, each with every core.
