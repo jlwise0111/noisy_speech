@@ -142,9 +142,19 @@ unet-venv: check-python
 	@test -x "$(UNET)/$(UNET_PY)" || { echo "  creating $(UNET)/.venv (downloads PyTorch)"; \
 	  cd $(UNET) && $(PYTHON) -m venv .venv && $(UNET_PY) -m pip install -q -r requirements.txt; }
 
-data-unet: unet-venv check-dataset ## Train the U-Net on 28spk and enhance the test set (hours; UNET_ARGS="...")
-	@$(call already_ran,$(UNET)/outputs/unet_28spk/config.json) || \
-	  (cd $(UNET) && $(UNET_PY) train_unet.py --dataset "$(DATASET)" --train-set 28spk --run-name unet_28spk $(UNET_ARGS))
+# train_unet.py writes config.json before training starts and adds "seconds" only when the whole
+# run (training + test enhancement) has finished, so that key, not the file, marks a finished run.
+# An unfinished run continues from last.pt (--resume); FORCE=1 starts over.
+UNET_RUN := unet_28spk
+data-unet: unet-venv check-dataset ## Train the U-Net on 28spk and enhance the test set (hours; resumes if interrupted)
+	@if test -z "$(FORCE)" && grep -qs '"seconds"' "$(UNET)/outputs/$(UNET_RUN)/config.json"; then \
+	  echo "  ✓ skip: $(UNET)/outputs/$(UNET_RUN) is a finished run (FORCE=1 to redo)"; \
+	elif pgrep -f -- "--run-name $(UNET_RUN)( |$$)" >/dev/null; then \
+	  echo "  ✗ $(UNET_RUN) is already training (see $(UNET)/$(UNET_RUN).log); not starting a second copy"; exit 1; \
+	else \
+	  cd $(UNET) && $(UNET_PY) -u train_unet.py --dataset "$(DATASET)" --train-set 28spk --run-name $(UNET_RUN) \
+	    $(if $(FORCE),,--resume) $(UNET_ARGS); \
+	fi
 
 unet-smoke: unet-venv check-dataset ## U-Net end to end on 300 files, 2 epochs (~3 min)
 	cd $(UNET) && $(UNET_PY) train_unet.py --dataset "$(DATASET)" --limit-files 300 --epochs 2 --test-limit 20 --run-name unet_smoke
