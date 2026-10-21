@@ -174,10 +174,10 @@ unet-smoke: unet-venv check-dataset ## U-Net end to end on 300 files, 2 epochs (
 	cd $(UNET) && $(UNET_PY) train_unet.py --dataset "$(DATASET)" --limit-files 300 --epochs 2 --test-limit 20 --run-name unet_smoke
 
 # ---------------------------------------------------------------------------- everything at once
-# run_pipeline.py does the scheduling in Python: one 16 kHz cache pass, then every model side by side
-# within the core budget Python detects (PIPELINE_ARGS="--cores N" to change it), then one scoring pass,
-# then the viewer. Finished runs are skipped; FORCE=1 redoes them. Logs go to logs/<run>.log.
-pipeline: unet-venv metrics-venv check-dataset ## Train every model at once → score all → open the viewer (hours)
+# run_pipeline.py does the scheduling in Python: one 16 kHz cache pass, then every baseline side by side,
+# then the U-Net alone with every core, all within the core budget Python detects
+# (PIPELINE_ARGS="--cores N" to change it), then one scoring pass, then the viewer. Finished runs are skipped; FORCE=1 redoes them. Logs go to logs/<run>.log.
+pipeline: unet-venv metrics-venv check-dataset ## Baselines in parallel → U-Net alone → score all → open the viewer
 	@if pgrep -f -- "--run-name $(UNET_RUN)( |$$)" >/dev/null; then \
 	  echo "  ✗ $(UNET_RUN) is already training; not starting a second pipeline"; exit 1; fi
 	$(PYTHON) run_pipeline.py --dataset "$(DATASET)" --port $(PORT) $(if $(FORCE),--force) $(PIPELINE_ARGS)

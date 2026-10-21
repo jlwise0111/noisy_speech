@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train / run every model at the same time, score them all, then open the diagnostic viewer.
+"""Run every baseline in parallel, then train the U-Net on its own, score them all, then open the viewer.
 
     python run_pipeline.py --dataset /path/to/valentini_noisy_speech_database     # or: make pipeline
     python run_pipeline.py --smoke --skip-viewer                                   # minutes, tiny limits
@@ -8,15 +8,19 @@ Phases:
     1. check     dataset folders, model environments, Docker (warned about up front, not hours later)
     2. cache     read + resample every needed 48 kHz file to 16 kHz once (speechprep.WaveCache), so no model
                  re-reads the dataset drive and none of them resamples the same file again
-    3. models    U-Net, Ridge (28spk / 56spk / both) and Wiener (leading / minstats / oracle) run side by side
-    4. evaluate  the metric suite scores every run in one shared process pool
-    5. viewer    docker compose up, wait for the health check, open the browser
+    3. baselines Ridge (28spk / 56spk / both) and Wiener (leading / minstats / oracle) run side by side,
+                 sharing the whole core budget
+    4. U-Net     trains alone afterwards with every core: PyTorch fixes its thread count when it starts,
+                 so it only gets the whole machine if nothing else is running
+    5. evaluate  the metric suite scores every run in one shared process pool
+    6. viewer    docker compose up, wait for the health check, open the browser
 
 No hardware is assumed. The core budget is what Python reports for this process (`--cores` overrides it)
-and no GPU is needed: the U-Net uses one only if PyTorch finds it. Each model gets a slice of the budget,
-passed to it as its worker / thread count, and every child process has its BLAS / OpenMP pools pinned to
+and no GPU is needed: the U-Net uses one only if PyTorch finds it. Each baseline gets a slice of the
+budget, passed to it as its worker count, and every child process has its BLAS / OpenMP pools pinned to
 one thread, so the processes together never ask for more cores than there are (no thrashing). A job only
-starts when its cores are free; when a job ends, its cores go to the next waiting one.
+starts when its cores are free; when a job ends, its cores go to the next waiting one. A failed baseline
+does not stop the U-Net, but it does stop the pipeline before evaluation.
 
 Runs that already finished are skipped (same markers as the Makefile); an interrupted U-Net run resumes
 from last.pt. --force redoes everything. Logs: logs/<run>.log.
@@ -67,6 +71,7 @@ class Job:
     cores: int
     done: callable = field(repr=False)     # () -> bool: True if a previous run already finished
     needs: tuple[str, ...] = ()            # dataset folders whose 16 kHz cache this job reads
+    stage: str = "baselines"               # jobs of one stage run together; stages run one after another
 
 
 def parse_args(argv=None):
@@ -98,18 +103,17 @@ def log(msg: str) -> None:
 
 # ---------------------------------------------------------------------------------------------- jobs
 def build_jobs(args) -> list[Job]:
-    """Every model run, longest first. Core shares are fractions of the budget, never fixed numbers."""
+    """Every model run, grouped into stages. Core shares are fractions of the budget, never fixed numbers."""
     cores, ds, cache = args.cores, str(args.dataset), str(args.cache_dir)
     prefix = "smoke_" if args.smoke else ""
     py = sys.executable
 
-    # The U-Net trains for hours, so it starts first with half the budget; the baselines share the rest
-    # two at a time. On one core everything simply runs one after another.
-    unet_cores = max(1, cores // 2)
-    base_cores = max(1, (cores - unet_cores) // 2) if cores > 1 else 1
-    workers = min(4, max(0, (unet_cores - 1) // 2))
-    unet_par = ["--workers", str(workers), "--val-workers", "1" if unet_cores >= 3 else "0",
-                "--threads", str(max(1, unet_cores - workers))]
+    # Baselines: three at a time, each with a third of the budget (one after another on a single core).
+    # U-Net: runs alone afterwards, so its loader workers plus torch threads add up to the whole budget.
+    base_cores = max(1, cores // 3)
+    workers = min(4, max(0, (cores - 1) // 2))
+    unet_par = ["--workers", str(workers), "--val-workers", "1" if cores >= 3 else "0",
+                "--threads", str(max(1, cores - workers))]
 
     unet_dir, linear, wiener = REPO / "unet_model", REPO / "linear_baseline", REPO / "wiener_baseline"
     test = ("clean_testset_wav", "noisy_testset_wav")
@@ -124,8 +128,7 @@ def build_jobs(args) -> list[Job]:
     if not args.force:
         unet_cmd.append("--resume")
     unet_cmd += shlex.split(args.unet_args)
-    jobs = [Job(unet_name, unet_dir, unet_cmd, unet_cores,
-                lambda: unet_cfg.exists() and '"seconds"' in unet_cfg.read_text(), spk["28spk"] + test)]
+    jobs = []
 
     for train_set in ("28spk", "56spk", "both"):
         name = f"{prefix}ridge_{train_set}"
@@ -147,6 +150,10 @@ def build_jobs(args) -> list[Job]:
         if args.smoke:
             cmd += ["--limit", "20"]
         jobs.append(Job(name, wiener, cmd, base_cores, marker.exists, test))
+
+    jobs.append(Job(unet_name, unet_dir, unet_cmd, cores,
+                    lambda: unet_cfg.exists() and '"seconds"' in unet_cfg.read_text(), spk["28spk"] + test,
+                    stage="U-Net"))
 
     if args.only:
         jobs = [j for j in jobs if re.search(args.only, j.name)]
@@ -221,19 +228,30 @@ def last_line(name: str) -> str:
         return ""
 
 
-def run_models(args, jobs: list[Job]) -> list[str]:
-    """Start jobs in order whenever their cores are free (later, smaller jobs may fill gaps). Returns failures."""
-    LOGS.mkdir(exist_ok=True)
+def pending_jobs(args, jobs: list[Job]) -> list[Job]:
+    """The jobs still to run: finished ones are skipped unless --force."""
     pending = []
     for j in jobs:
         if not args.force and j.done():
             log(f"✓ skip {j.name}: already finished (--force to redo)")
         else:
             pending.append(j)
-    if not pending:
-        return []
-    warm_cache(args, pending)
+    return pending
 
+
+def run_stages(args, jobs: list[Job]) -> list[str]:
+    """Run each stage's jobs together, one stage after another, in build order. Returns failures."""
+    failed = []
+    for stage in dict.fromkeys(j.stage for j in jobs):
+        group = [j for j in jobs if j.stage == stage]
+        log(f"▶ stage: {stage} ({len(group)} job(s), core budget {args.cores})")
+        failed += run_models(args, group)
+    return failed
+
+
+def run_models(args, pending: list[Job]) -> list[str]:
+    """Start jobs in order whenever their cores are free (later, smaller jobs may fill gaps). Returns failures."""
+    LOGS.mkdir(exist_ok=True)
     free, futures, failed = args.cores, {}, []
     last_beat = time.time()
     with ThreadPoolExecutor(max_workers=len(pending)) as pool:
@@ -313,7 +331,9 @@ def main(argv=None) -> int:
     t0 = time.time()
     jobs = build_jobs(args)
     check(args, jobs)
-    failed = run_models(args, jobs)
+    pending = pending_jobs(args, jobs)
+    warm_cache(args, pending)
+    failed = run_stages(args, pending)
     if failed:
         log(f"✗ {len(failed)} job(s) failed: {', '.join(failed)}. Fix and re-run: finished runs are skipped.")
         return 1

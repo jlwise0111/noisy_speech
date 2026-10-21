@@ -38,12 +38,15 @@ Tell make where the dataset is with `make … DATASET=/path/to/valentini_noisy_s
 
 1. Every needed 48 kHz file is resampled to 16 kHz once into `.cache/speechprep`, in parallel. Every model
    then reads that cache instead of re-reading the dataset.
-2. The U-Net, Ridge (28spk / 56spk / both) and Wiener (leading / minstats / oracle) runs train side by side.
-   Each gets a share of the cores Python detects (`PIPELINE_ARGS="--cores N"` to override) as its worker /
-   thread count, and BLAS / OpenMP pools are pinned to one thread per process, so the jobs never ask for
-   more cores than there are. No GPU is needed; the U-Net uses one only if PyTorch finds it.
-3. The metric suite scores all runs in one shared process pool (`metric_suite/results/summary.md`).
-4. The diagnostic viewer starts and opens in the browser.
+2. The baselines, Ridge (28spk / 56spk / both) and Wiener (leading / minstats / oracle), run side by side.
+   Each gets a share of the cores Python detects (`PIPELINE_ARGS="--cores N"` to override) as its worker
+   count, and BLAS / OpenMP pools are pinned to one thread per process, so the jobs never ask for more
+   cores than there are.
+3. The U-Net then trains on its own with every core, split between data-loader workers and PyTorch
+   threads. PyTorch fixes its thread count at start-up, so running it alone is what lets it use the whole
+   machine. No GPU is needed; it uses one only if PyTorch finds it.
+4. The metric suite scores all runs in one shared process pool (`metric_suite/results/summary.md`).
+5. The diagnostic viewer starts and opens in the browser.
 
 Finished runs are skipped and an interrupted U-Net run resumes, so re-running is safe; `FORCE=1` redoes
 everything. Progress is printed as jobs start and finish; each job's full output is in `logs/<run>.log`.
