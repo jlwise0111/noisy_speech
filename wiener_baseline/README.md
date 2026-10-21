@@ -8,8 +8,8 @@ clean / noisy / processed triplets in the layout `diagnostic_viewer` reads.
 
 ## Algorithm
 
-Audio is resampled from Valentini's 48 kHz to 16 kHz on load (`--sr`), the rate every model in the project
-uses. All processing is done per STFT bin. Defaults: Hann window, 32 ms frames (512 samples), 75% overlap.
+The filter runs at **16 kHz only**: Valentini's 48 kHz files are resampled on load, the rate every model in
+the project uses, and any other rate is refused. All processing is done per STFT bin. Defaults: Hann window, 32 ms frames (512 samples), 75% overlap.
 
 1. **Noise PSD estimate** `N(f)`
    - `leading` (default): mean power over the first 0.25 s. Valentini clips start with a short pause.
@@ -38,7 +38,6 @@ python run_baseline.py --dataset "$DATA" --split test --method oracle # upper bo
 
 - `--split`: `test`, `train28` or `train56`.
 - `--jobs`: number of parallel processes (default: every core available to the process).
-- `--sr`: processing and output sample rate (default 16000; `0` keeps the files' own rate).
 - `--cache-dir`: read 16 kHz waveforms from the shared `speechprep` cache (`../.cache/speechprep`) instead of
   resampling each file again. `make pipeline` sets this.
 - Every `WienerParams` field can be set from the command line, e.g. `--gain-floor-db -15 --alpha 0.95`.

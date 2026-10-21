@@ -4,8 +4,8 @@
 Output layout (what diagnostic_viewer's "subfolders" mode expects):
 
     outputs/<run-name>/
-        clean/<stem>.wav       dataset file resampled to --sr (16 kHz)
-        noisy/<stem>.wav       dataset file resampled to --sr (16 kHz)
+        clean/<stem>.wav       dataset file resampled to 16 kHz
+        noisy/<stem>.wav       dataset file resampled to 16 kHz
         processed/<stem>.wav   Wiener output, same sr and length as noisy
         params.json            settings used for this run
         quick_metrics.csv      per-file SNR / SI-SDR sanity check
@@ -39,16 +39,16 @@ REPO = HERE.parent
 _cache = None  # one speechprep.WaveCache per worker process, when --cache-dir is given
 
 
-def load(path: Path, sr: int, cache_root: Path | None) -> tuple[np.ndarray, int]:
-    """The file at `sr`, from the shared 16 kHz waveform cache if there is one, else read and resampled."""
+def load(path: Path, cache_root: Path | None) -> np.ndarray:
+    """The file at 16 kHz, from the shared waveform cache if there is one, else read and resampled."""
     global _cache
-    if cache_root is None or sr != SR:
-        return read_wav(path, sr)
+    if cache_root is None:
+        return read_wav(path)[0]
     if _cache is None:
         sys.path.insert(0, str(REPO))
         from speechprep import WaveCache
-        _cache = WaveCache(cache_root, sr)
-    return _cache.load(path), sr
+        _cache = WaveCache(cache_root, SR)
+    return _cache.load(path)
 
 
 def snr_db(ref: np.ndarray, est: np.ndarray) -> float:
@@ -64,12 +64,11 @@ def si_sdr_db(ref: np.ndarray, est: np.ndarray) -> float:
 
 
 def process_one(job: tuple) -> dict:
-    stem, noisy_path, clean_path, run_dir, method, noise_est, params, sr, cache_root = job
-    noisy, sr = load(noisy_path, sr, cache_root)
-    clean, sr_c = load(clean_path, sr, cache_root)
-    if sr != sr_c or len(noisy) != len(clean):
-        raise ValueError(f"{stem}: noisy/clean mismatch "
-                         f"({sr} Hz, {len(noisy)}) vs ({sr_c} Hz, {len(clean)})")
+    stem, noisy_path, clean_path, run_dir, method, noise_est, params, cache_root = job
+    noisy, clean = load(noisy_path, cache_root), load(clean_path, cache_root)
+    if len(noisy) != len(clean):
+        raise ValueError(f"{stem}: noisy/clean length mismatch ({len(noisy)} vs {len(clean)} samples)")
+    sr = SR
 
     if method == "oracle":
         out = wiener_oracle(noisy, clean, sr, params)
@@ -109,8 +108,6 @@ def main() -> int:
     ap.add_argument("--run-name", help="default: <method>_<noise-est>_<split>")
     ap.add_argument("--jobs", type=int, default=(getattr(os, "process_cpu_count", None) or os.cpu_count)() or 1,
                     help="parallel worker processes (default: every core available to this process)")
-    ap.add_argument("--sr", type=int, default=SR,
-                    help="processing / output sample rate (default 16000; 0 keeps the files' own rate)")
     ap.add_argument("--cache-dir", type=Path, default=None,
                     help="shared speechprep 16 kHz waveform cache (e.g. ../.cache/speechprep); default: no cache")
     for name, default in WienerParams().to_dict().items():
@@ -134,8 +131,7 @@ def main() -> int:
         return 1
     print(f"{len(pairs)} file(s) from '{args.split}' -> {run_dir}")
 
-    sr = args.sr or None
-    jobs = [(s, n, c, run_dir, args.method, args.noise_est, params, sr, args.cache_dir) for s, n, c in pairs]
+    jobs = [(s, n, c, run_dir, args.method, args.noise_est, params, args.cache_dir) for s, n, c in pairs]
     t0 = time.time()
     rows = []
     with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as ex:
@@ -153,7 +149,7 @@ def main() -> int:
         "noise_est": args.noise_est if args.method == "wiener" else None,
         "split": args.split,
         "dataset": dataset.name,
-        "sr": sr or "native",
+        "sr": SR,
         "n_files": len(rows),
         "git_commit": git_commit(),
         "params": params.to_dict(),

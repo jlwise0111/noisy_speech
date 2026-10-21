@@ -82,8 +82,8 @@ valentini_noisy_speech_database/
 Keep it anywhere outside the repository and pass its path with `--dataset`, or set `VALENTINI_DIR`
 (section 4.4). The examples use `/path/to/valentini_noisy_speech_database` as a placeholder.
 
-All files are **48 kHz, mono, 16-bit PCM WAV**. The baseline resamples them to **16 kHz** on load (`--sr`,
-default 16000), the same rate every other model in the project uses. Noisy and clean files with the same name (e.g.
+All files are **48 kHz, mono, 16-bit PCM WAV**. The baseline resamples them to **16 kHz** on load and the filter
+runs at 16 kHz only, the same rate every other model in the project uses. Noisy and clean files with the same name (e.g.
 `p232_001.wav`) are the same utterance and the same length in samples.
 
 The baseline **only reads** from this folder. `run_baseline.py` refuses to run if `--out` points
@@ -232,8 +232,7 @@ a time. `Y(t, f)` is the noisy spectrum, `S` the clean speech and `N` the noise.
 noisy wav ─► STFT Y ─► noise PSD N̂(f) ─► a-priori SNR ξ ─► gain G = ξ/(1+ξ) ─► Ŝ = G·Y ─► ISTFT ─► processed wav
 ```
 
-1. **STFT.** Hann window, 32 ms frames (512 samples at 16 kHz), 75 % overlap (8 ms hop). Frame sizes are
-   set in milliseconds, so `--sr 0` (the files' own 48 kHz) gives 1536-sample frames with the same timing.
+1. **STFT.** 16 kHz input only. Hann window, 32 ms frames (512 samples), 75 % overlap (8 ms hop, 128 samples).
 
 2. **Noise power estimate `N̂`.**
    - **`leading`** (default) averages `|Y|²` over the first `noise_init_s` = 0.25 s. Valentini

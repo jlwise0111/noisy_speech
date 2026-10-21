@@ -1,3 +1,3 @@
-from .wiener import WienerParams, wiener_filter, wiener_gain, wiener_oracle
+from .wiener import SR, WienerParams, wiener_filter, wiener_gain, wiener_oracle
 
-__all__ = ["WienerParams", "wiener_filter", "wiener_gain", "wiener_oracle"]
+__all__ = ["SR", "WienerParams", "wiener_filter", "wiener_gain", "wiener_oracle"]
