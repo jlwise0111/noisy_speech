@@ -16,7 +16,7 @@ import streamlit as st
 
 from viewer import dsp, figures, metrics
 from viewer.audio_io import Audio, TripletError, load_wav, to_wav_bytes, validate_strict
-from viewer.dataset import DEFAULT_FOLDER_ALIASES, DEFAULT_SUFFIX_ALIASES, ROLES, discover, list_wavs
+from viewer.dataset import ROLES, discover, list_wavs
 from viewer.player import player
 from viewer.systems import SYSTEMS, group_runs, split_key
 
@@ -26,13 +26,14 @@ TARGET_LUFS = -20.0
 SYSTEM_COLORS = {"Neural network": "#a495ff", "Wiener baseline": "#4fd1a5", "Ridge baseline": "#f39c12",
                  "Other": "#8a919e"}
 
-st.set_page_config(page_title="Speech Isolation Viewer", page_icon="🎧", layout="wide",
-                   initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Speech Isolation Viewer", page_icon="🎧", layout="wide")
 st.markdown("""<style>
 .block-container{padding-top:2.6rem;padding-bottom:1rem;padding-left:2rem;padding-right:2rem;max-width:100%}
 h3{margin:0!important;padding:0!important}
 /* no "Running…" indicator (icon and word) in the top-right corner */
 [data-testid="stStatusWidget"]{display:none!important}
+/* no Deploy button or ⋮ menu in the top-right corner */
+[data-testid="stToolbar"]{display:none!important}
 /* header: labels on buttons, popovers and toggles never break mid-word */
 .stButton button p,.stCheckbox label p{white-space:nowrap}
 .stButton button{padding-left:.6rem;padding-right:.6rem}
@@ -66,8 +67,8 @@ h3{margin:0!important;padding:0!important}
 # a pickled copy rebuilt on every rerun. The nonce is per browser session (see below), so a few
 # scans are kept: enough for the open tabs, without growing for as long as the container runs.
 @st.cache_resource(show_spinner="Scanning dataset…", max_entries=4)
-def cached_discover(root: str, layout: str, folder_aliases: tuple, suffix_aliases: tuple, nonce: int):
-    return discover(root, layout, {r: list(a) for r, a in folder_aliases}, {r: list(a) for r, a in suffix_aliases})
+def cached_discover(root: str, nonce: int):
+    return discover(root)
 
 
 @st.cache_resource(show_spinner=False, max_entries=4)
@@ -116,43 +117,20 @@ def mtime(p: Path) -> float:
     return p.stat().st_mtime
 
 
-def aliases_input(label: str, defaults: dict[str, list[str]], key: str) -> tuple:
-    out = []
-    for r in ROLES:
-        txt = st.text_input(f"{label} — {r}", ", ".join(defaults[r]), key=f"{key}_{r}")
-        out.append((r, tuple(a.strip() for a in txt.split(",") if a.strip())))
-    return tuple(out)
-
-
-# ---------------------------------------------------------------------------- sidebar: dataset only
+# ---------------------------------------------------------------------------- dataset scan
 ss = st.session_state
 # A new browser session (first visit, page reload, or the tab the pipeline opens) scans the folder
-# afresh, so outputs written while the container was running show up without ↻ Rescan.
+# afresh, so outputs written while the container was running show up after a reload.
 ss.setdefault("nonce", time.time_ns())
 ss.setdefault("tri_idx", 0)
 
-with st.sidebar:
-    st.header("Dataset")
-    root = st.text_input("Data folder (container path)", DATA_DIR,
-                         help="The host folder is set with DATA_DIR in .env and mounted read-only at /data.")
-    layout = st.radio("Layout", ["auto", "subfolders", "suffix"], horizontal=True,
-                      help="subfolders: root/clean/x.wav, root/noisy/x.wav …  ·  suffix: x_clean.wav, x_noisy.wav …")
-    with st.expander("Role naming (comma-separated aliases)"):
-        folder_aliases = aliases_input("Folder", DEFAULT_FOLDER_ALIASES, "fa")
-        suffix_aliases = aliases_input("Suffix", DEFAULT_SUFFIX_ALIASES, "sa")
-    if st.button("↻ Rescan folder", use_container_width=True):
-        ss.nonce += 1
-
+root = DATA_DIR  # the host folder set by DATA_DIR in .env, mounted read-only at /data
 root_path = Path(root)
-triplets = cached_discover(root, layout, folder_aliases, suffix_aliases, ss.nonce)
+triplets = cached_discover(root, ss.nonce)
 all_wavs = cached_list_wavs(root, ss.nonce)
-n_ok = sum(t.resolved for t in triplets)
-with st.sidebar:
-    st.caption(f"{len(all_wavs)} .wav files · {len(triplets)} triplets ({n_ok} complete)")
 
 if not root_path.is_dir():
-    st.error(f"Data folder `{root}` does not exist inside the container. Check DATA_DIR in `.env` "
-             "(dataset settings are in the sidebar, top-left `>`).")
+    st.error(f"Data folder `{root}` does not exist inside the container. Check DATA_DIR in `.env`.")
     st.stop()
 if not all_wavs:
     st.info(f"No .wav files found under `{root}`. Put your audio in the folder set by DATA_DIR in `.env` "
@@ -245,7 +223,7 @@ if runs_by_path and not run:
     st.info(f"**{ss.sel_system}: no outputs found yet** under `{root}`.  \n"
             "Write them as `<folder>/<run>/{clean,noisy,enhanced}/<stem>.wav` (for example "
             "`unet_model/outputs/unet_28spk/enhanced/p232_001.wav`). Any folder name containing one of "
-            f"{', '.join(dict(SYSTEMS).get(ss.sel_system, ()))} is listed under this system after **↻ Rescan folder**.")
+            f"{', '.join(dict(SYSTEMS).get(ss.sel_system, ()))} is listed under this system after a page reload.")
     st.stop()
 
 h_title, h_prev, h_next, h_pick = st.columns([3.6, 0.5, 0.5, 2.6], vertical_alignment="center")

@@ -39,7 +39,7 @@ in either layout, at any depth:
 | subfolders | `exp1/clean/p232_001.wav`, `exp1/noisy/p232_001.wav`, `exp1/enhanced/p232_001.wav` |
 | suffix     | `p232_001_clean.wav`, `p232_001_noisy.wav`, `p232_001_processed.wav`           |
 
-Role aliases can be edited in the sidebar under **Role naming**. The defaults are:
+Both layouts are detected automatically. The role names recognised are (`DEFAULT_*_ALIASES` in `viewer/dataset.py`):
 - folders: `clean`, `noisy`, and `processed`/`enhanced`/`denoised`/`output`
 - suffixes: `clean`, `noisy`, and `processed`/`enhanced`/`denoised`
 
@@ -67,8 +67,7 @@ run also carries its own `clean/` and `noisy/` copies, so a run at any other sam
 still be compared strictly against its own references.
 
 The folder is scanned when a browser tab opens (or is reloaded). Outputs written while the viewer
-is open, for example a model that finishes training later, appear after a page reload or
-**↻ Rescan folder** in the sidebar; the selected file stays selected.
+is open, for example a model that finishes training later, appear after a page reload.
 
 **Strict comparison:** files must match exactly in sample rate, channel count and length
 (in samples). If they don't, the app shows the exact mismatch and refuses to render.
@@ -99,7 +98,8 @@ The screen has three areas: the stacked spectrograms on the left, a numbers pane
 - **Display settings are fixed:** log frequency axis, ≈64 ms Hann window with 1/4 hop, −110 to −20 dB
   contrast, Ember colours, waveform overlay at 55 % on a shared scale. Change them in `app.py`
   (display settings section) if needed.
-- Dataset settings are in the collapsed sidebar (`>` at the top left).
+- The data folder is the one set by `DATA_DIR` in `.env` (mounted read-only at `/data`); there are no
+  on-screen dataset settings.
 - **Analysis** (collapsed drawer below the main view):
 
 | Tab | Contents |
