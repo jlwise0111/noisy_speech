@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -63,13 +64,14 @@ h3{margin:0!important;padding:0!important}
 
 # ---------------------------------------------------------------------------- cached work
 # cache_resource, not cache_data: one shared copy of the (large, read-only) scan results instead of
-# a pickled copy rebuilt on every rerun.
-@st.cache_resource(show_spinner="Scanning dataset…")
+# a pickled copy rebuilt on every rerun. The nonce is per browser session (see below), so a few
+# scans are kept: enough for the open tabs, without growing for as long as the container runs.
+@st.cache_resource(show_spinner="Scanning dataset…", max_entries=4)
 def cached_discover(root: str, layout: str, folder_aliases: tuple, suffix_aliases: tuple, nonce: int):
     return discover(root, layout, {r: list(a) for r, a in folder_aliases}, {r: list(a) for r, a in suffix_aliases})
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, max_entries=4)
 def cached_list_wavs(root: str, nonce: int) -> list[Path]:
     return list_wavs(Path(root))
 
@@ -125,7 +127,9 @@ def aliases_input(label: str, defaults: dict[str, list[str]], key: str) -> tuple
 
 # ---------------------------------------------------------------------------- sidebar: dataset only
 ss = st.session_state
-ss.setdefault("nonce", 0)
+# A new browser session (first visit, page reload, or the tab the pipeline opens) scans the folder
+# afresh, so outputs written while the container was running show up without ↻ Rescan.
+ss.setdefault("nonce", time.time_ns())
 ss.setdefault("tri_idx", 0)
 
 with st.sidebar:
@@ -157,6 +161,10 @@ if not all_wavs:
     st.stop()
 
 # ---------------------------------------------------------------------------- systems → runs → files
+if ss.get("scan_id") != id(triplets):  # a new scan can renumber the files: keep the same one selected
+    ss.scan_id = id(triplets)
+    keys = {t.stem: i for i, t in enumerate(triplets)}
+    ss.sel_tri = keys.get(ss.get("sel_key"), ss.get("sel_tri"))
 systems = group_runs(triplets)
 runs_by_path = {r.path: r for rs in systems.values() for r in rs}
 
@@ -195,6 +203,7 @@ else:  # wavs, but nothing that forms a triplet: manual selection only
 if ss.get("sel_tri") not in options:
     ss.sel_tri = options[0]
 ss.system, ss.run, ss.tri_idx = ss.get("sel_system"), ss.get("sel_run"), ss.sel_tri  # mirror into widgets
+ss.sel_key = triplets[ss.sel_tri].stem if ss.sel_tri != MANUAL else None
 
 
 def step(delta: int):
