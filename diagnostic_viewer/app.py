@@ -247,7 +247,7 @@ display_pop = s_disp.popover("⚙ Display", use_container_width=True)
 if runs_by_path and not run:
     st.info(f"**{ss.sel_system}: no outputs found yet** under `{root}`.  \n"
             "Write them as `<folder>/<run>/{clean,noisy,enhanced}/<stem>.wav` (for example "
-            "`neural_network/outputs/crn_v1/enhanced/p232_001.wav`). Any folder name containing one of "
+            "`unet_model/outputs/unet_28spk/enhanced/p232_001.wav`). Any folder name containing one of "
             f"{', '.join(dict(SYSTEMS).get(ss.sel_system, ()))} is listed under this system after **↻ Rescan folder**.")
     st.stop()
 

@@ -59,10 +59,14 @@ Each run is assigned to a **system** by the words in its folder path:
 | Ridge baseline | `ridge`, `linear` | `linear_baseline/outputs/ridge_28spk/` |
 | Other | anything else | `diagnostic_viewer/data/demo/subfolders/` |
 
-The rules are in `viewer/systems.py`. The header always lists all three project systems. A system
-with no outputs yet (currently the neural network) shows where to write them. Each run carries its
-own `clean/` and `noisy/` copies, so systems working at different sample rates (Wiener at 48 kHz,
-Ridge at 16 kHz) each stay strictly comparable.
+The rules are in `viewer/systems.py`. The header always lists all three project systems; one with
+no outputs yet shows where to write them. All three systems write their outputs at 16 kHz. Each
+run also carries its own `clean/` and `noisy/` copies, so a run at any other sample rate would
+still be compared strictly against its own references.
+
+The folder is scanned when a browser tab opens (or is reloaded). Outputs written while the viewer
+is open, for example a model that finishes training later, appear after a page reload or
+**↻ Rescan folder** in the sidebar; the selected file stays selected.
 
 **Strict comparison:** files must match exactly in sample rate, channel count and length
 (in samples). If they don't, the app shows the exact mismatch and refuses to render.
