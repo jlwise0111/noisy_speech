@@ -31,6 +31,8 @@ st.set_page_config(page_title="Speech Isolation Viewer", page_icon="🎧", layou
 st.markdown("""<style>
 .block-container{padding-top:2.6rem;padding-bottom:1rem;padding-left:2rem;padding-right:2rem;max-width:100%}
 h3{margin:0!important;padding:0!important}
+/* no "Running…" indicator (icon and word) in the top-right corner */
+[data-testid="stStatusWidget"]{display:none!important}
 /* header: labels on buttons, popovers and toggles never break mid-word */
 .stButton button p,.stCheckbox label p{white-space:nowrap}
 .stButton button{padding-left:.6rem;padding-right:.6rem}
