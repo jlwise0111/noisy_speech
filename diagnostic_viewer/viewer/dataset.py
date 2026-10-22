@@ -64,6 +64,9 @@ class Triplet:
 
 
 SKIP_DIRS = {"__pycache__", "node_modules"}
+# Runs written by `make pipeline-smoke` (a few files, two epochs): pipeline checks, not results.
+# The metric suite leaves them out of its report too.
+SKIP_PREFIXES = ("smoke_",)
 
 # {relative dir ("" for the root): (sorted sub-folder names, sorted .wav file names)}
 Tree = dict[str, tuple[list[str], list[str]]]
@@ -75,7 +78,7 @@ def scan(root: Path) -> Tree:
     The directory entries already say whether each name is a file or a folder, so this needs no
     per-file stat calls. That matters on Docker bind mounts, where every stat is slow: a whole
     project of ~120k wavs scans in well under a second. Hidden entries (".git", macOS "._*"
-    resource forks) and cache folders are skipped.
+    resource forks), cache folders and smoke-test runs are skipped.
     """
     root = Path(root)
     tree: Tree = {}
@@ -89,7 +92,7 @@ def scan(root: Path) -> Tree:
                     if e.name.startswith("."):
                         continue
                     if e.is_dir(follow_symlinks=False):
-                        if e.name not in SKIP_DIRS:
+                        if e.name not in SKIP_DIRS and not e.name.startswith(SKIP_PREFIXES):
                             dirs.append(e.name)
                     elif e.name.lower().endswith(".wav") and e.is_file():
                         wavs.append(e.name)

@@ -50,6 +50,8 @@ triplet from any three files.
 ### Systems and runs
 
 Every folder that contains a triplet is a **run**, for example `linear_baseline/outputs/ridge_28spk`.
+Folders whose name starts with `smoke_` (the few-file runs from `make pipeline-smoke`) are not
+shown, so every run listed is a real result.
 Each run is assigned to a **system** by the words in its folder path:
 
 | System | Folder words | Example run folder |
