@@ -100,7 +100,7 @@ The screen has three areas: the stacked spectrograms on the left, a numbers pane
   (display settings section) if needed.
 - The data folder is the one set by `DATA_DIR` in `.env` (mounted read-only at `/data`); there are no
   on-screen dataset settings.
-- **Analysis** (collapsed drawer below the main view):
+- **Analysis** (drawer below the main view, open from the start):
 
 | Tab | Contents |
 |---|---|

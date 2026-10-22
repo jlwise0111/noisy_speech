@@ -352,7 +352,7 @@ player(
 )
 
 # ---------------------------------------------------------------------------- analysis drawer
-with st.expander("Analysis", expanded=False):
+with st.expander("Analysis", expanded=True):
     tab_l, tab_e, tab_m = st.tabs(["Long-term spectrum", "Loudness over time", "All metrics"])
 
     with tab_l:
