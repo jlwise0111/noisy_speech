@@ -133,7 +133,6 @@ docker compose run --rm -v ./:/app viewer pytest -q
 | `viewer/dsp.py` | STFT, mel, LTAS, envelope, stats, BS.1770 loudness and matching |
 | `viewer/metrics.py` | Metrics |
 | `viewer/figures.py` | Plotly figures |
-| `viewer/export.py` | Figure export and CSV |
 | `viewer/player/` | Web Audio + Plotly.js player that runs in the browser |
 
 `PLAN.md` is the accepted design plan.

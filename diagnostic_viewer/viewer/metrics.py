@@ -116,12 +116,3 @@ def scorecard(df: pd.DataFrame) -> list[dict]:
         out.append({"label": label, "tooltip": tip, "decimals": decimals, "noisy": _num(r["noisy"]),
                     "processed": _num(r["processed"]), "delta": _num(r["Δ (processed − noisy)"])})
     return out
-
-
-def flatten(df: pd.DataFrame) -> dict:
-    """One-row dict (for batch CSV): e.g. {'SI-SDR (dB) noisy': .., 'SI-SDR (dB) processed': ..}."""
-    out = {}
-    for _, r in df.iterrows():
-        for col in ("noisy", "processed", "Δ (processed − noisy)"):
-            out[f"{r['metric']} {col}"] = r[col]
-    return out

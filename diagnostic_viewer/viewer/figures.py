@@ -1,4 +1,4 @@
-"""Plotly figure builders. The stacked figure is used both live (player) and for export."""
+"""Plotly figure builders: the stacked spectrogram figure (player) and the analysis charts."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ EMBER = [  # black → deep blue → rust → orange → amber → near-white, a
 ]
 SPEC_COLORMAPS = {"Ember": EMBER, "Magma": "Magma", "Viridis": "Viridis", "Greys": "Greys"}
 
-TRACK_PX, DIFF_PX, GAP_PX = 230, 200, 8
+TRACK_PX, GAP_PX = 230, 8
 MARGIN = dict(l=52, r=58, t=6, b=34)
 MEL_TICKS_HZ = (100, 200, 500, 1000, 2000, 4000, 8000, 16000)
 
@@ -41,13 +41,6 @@ class TrackView:
     x: np.ndarray
     sr: int
     spec: dsp.Spectrogram
-
-
-@dataclass
-class DiffView:
-    label: str
-    db: np.ndarray
-    spec: dsp.Spectrogram  # for the time/frequency axes
 
 
 def _dark(fig: go.Figure, height: int) -> None:
@@ -139,28 +132,6 @@ def stacked_figure(
         colorscale=SPEC_COLORMAPS.get(colormap, colormap), cmin=db_range[0], cmax=db_range[1],
         colorbar=dict(thickness=8, len=1, y=0.5, x=1.004, xpad=6, outlinewidth=0, ticksuffix=" dB",
                       tickfont=dict(size=10, color=MUTED), nticks=6)))
-    return fig
-
-
-def difference_figure(diffs: list[DiffView], sr: int, diff_range: float = 20.0) -> go.Figure:
-    n = len(diffs)
-    height = n * DIFF_PX + (n - 1) * GAP_PX + MARGIN["t"] + MARGIN["b"]
-    fig = make_subplots(rows=n, cols=1, shared_xaxes=True, vertical_spacing=GAP_PX / height)
-    for i, d in enumerate(diffs, start=1):
-        s = d.spec
-        fig.add_trace(go.Heatmap(
-            x=s.times, y=_spec_y(s), z=d.db, coloraxis="coloraxis",
-            hovertemplate="%{x:.3f} s · %{y:.0f} " + ("mel" if s.scale == "mel" else "Hz")
-            + " · %{z:+.1f} dB<extra>" + d.label + "</extra>",
-        ), row=i, col=1)
-        _freq_axis(fig, i, s, sr)
-        _label(fig, i, f"<b>{d.label}</b>", f"diff{i}")
-    _dark(fig, height)
-    _time_axis(fig, n)
-    fig.update_layout(coloraxis=dict(
-        colorscale="RdBu_r", cmid=0, cmin=-diff_range, cmax=diff_range,
-        colorbar=dict(thickness=8, len=1, x=1.004, xpad=6, outlinewidth=0, ticksuffix=" dB",
-                      tickfont=dict(size=10, color=MUTED))))
     return fig
 
 

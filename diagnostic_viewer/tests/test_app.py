@@ -20,7 +20,6 @@ def data_dir(tmp_path, monkeypatch):
             sf.write(p, x, 16000)
     sf.write(tmp_path / "odd_clean.wav", make_triplet(16000, 2.0)[0], 16000)
     monkeypatch.setenv("VIEWER_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("VIEWER_EXPORT_DIR", str(tmp_path / "exports"))
     return tmp_path
 
 
@@ -46,18 +45,6 @@ def test_unresolved_triplet_asks_user(data_dir):
     odd = next(i for i, l in enumerate(labels) if "odd" in l)
     at.selectbox(key="tri_idx").set_value(odd).run()  # value = triplet index
     assert any("missing noisy" in w.value for w in at.warning)
-
-
-def test_figure_export_png_svg():
-    from viewer import dsp, export, figures
-
-    c, n, p = make_triplet(16000, 1.0)
-    params = dsp.StftParams(scale="mel")
-    tracks = [figures.TrackView(i + 1, r, f"{r}.wav", x, 16000, dsp.spectrogram(x, 16000, params))
-              for i, (r, x) in enumerate(zip(("clean", "noisy", "processed"), (c, n, p)))]
-    fig = figures.stacked_figure(tracks, (-110, -20), monitored_slot=0)
-    assert export.figure_image(fig, "png", 800, 1)[:4] == b"\x89PNG"
-    assert b"<svg" in export.figure_image(fig, "svg", 800)[:500]
 
 
 def test_strict_mismatch_shows_error(tmp_path, monkeypatch):
@@ -102,7 +89,6 @@ def systems_dir(tmp_path, monkeypatch):
                 f.parent.mkdir(parents=True, exist_ok=True)
                 sf.write(f, x, 16000)
     monkeypatch.setenv("VIEWER_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("VIEWER_EXPORT_DIR", str(tmp_path / "exports"))
     return tmp_path
 
 

@@ -61,4 +61,4 @@ outputs/<run_name>/                 # default: ridge_<train-set>_<YYYYmmdd_HHMMS
 cd ../diagnostic_viewer
 DATA_DIR=../linear_baseline/outputs docker compose up
 ```
-Each run folder shows up as `<run_name>/<stem>` triplets. The viewer's batch export computes SNR, SI-SDR, PESQ and STOI for a whole run.
+Each run folder shows up as `<run_name>/<stem>` triplets. To score SNR, SI-SDR, PESQ and STOI over whole runs, use `make evaluate` (metric suite).

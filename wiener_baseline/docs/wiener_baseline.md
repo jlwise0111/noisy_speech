@@ -60,8 +60,8 @@ branches**. You can run the baseline on one branch, then switch to the viewer br
 the output.
 
 > Switching to `feature/wiener-baseline` may show `diagnostic_viewer/` as untracked. It holds the
-> viewer's local, gitignored `data/` and `exports/` folders, left behind by the branch switch. This
-> is harmless: don't commit it, and don't delete it if you want to keep your viewer exports.
+> viewer's local, gitignored `data/` folder, left behind by the branch switch. This is harmless:
+> don't commit it.
 
 ---
 
@@ -191,11 +191,11 @@ mean over 824 files      noisy   processed   delta
   SNR      (dB)            8.39       15.91   +7.52
   SI_SDR   (dB)            8.39       15.76   +7.36
 
-PESQ/STOI: point diagnostic_viewer at .../outputs/wiener_leading_test and use batch export.
+PESQ/STOI: make evaluate;  listen: make viewer
 ```
 
 The SNR and SI-SDR summary is a quick check computed with numpy. For the full quality and
-intelligibility scores (PESQ, STOI), use the viewer's batch export (section 8.3).
+intelligibility scores (PESQ, STOI), run `make evaluate` (the metric suite).
 
 ### 5.5 Command-line reference
 
@@ -356,20 +356,19 @@ From `diagnostic_viewer/` with its requirements installed (`pip install -r requi
 VIEWER_DATA_DIR=../wiener_baseline/outputs streamlit run app.py
 ```
 
-You can also change the **data folder** in the viewer's sidebar at any time and press **Rescan folder**.
+To switch folders, change `DATA_DIR` / `VIEWER_DATA_DIR` and restart; to pick up new outputs, reload the page.
 
 ### 8.3 What you'll see
 
 - If `DATA_DIR` is a single run folder, triplets are listed by name (`p232_001`, ...).
 - If `DATA_DIR` is `outputs/`, triplets are prefixed with their run (`wiener_leading_test/p232_001`,
   `oracle_test/p232_001`, ...), so you can flip between methods for the same utterance.
-- **Analysis & export → Export → batch CSV** scores every triplet in the folder: SNR, SI-SDR,
-  PESQ and STOI for noisy and processed, plus the change. The CSV is written to
-  `diagnostic_viewer/exports/`. PESQ on the train splits takes a long time, so batch-score the test split.
+- The viewer scores the file on screen (SNR, SI-SDR, PESQ, STOI). To score every file of every run,
+  use `make evaluate` (the metric suite).
 
 Things to look at:
-- **Spectrogram / Differences tab:** red in `processed − clean` is residual noise. Blue means speech
-  was removed (often high-frequency consonants).
+- **Spectrograms:** energy left in the pauses of `processed` is residual noise; missing energy
+  compared with `clean` is speech that was removed (often high-frequency consonants).
 - **Loudness over time / noise floor:** how far the pauses dropped compared with noisy.
 - **Listening:** musical noise (warbling tones in the pauses) is the classic Wiener artefact.
 

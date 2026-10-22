@@ -1,4 +1,4 @@
-"""Signal analysis: spectrograms, difference spectrograms, LTAS, level envelope, stats."""
+"""Signal analysis: spectrograms, LTAS, level envelope, stats."""
 
 from __future__ import annotations
 
@@ -107,11 +107,6 @@ def spectrogram(x: np.ndarray, sr: int, p: StftParams) -> Spectrogram:
     times = _bin_axis(times, p.max_frames)
     db = 10.0 * np.log10(power + EPS)
     return Spectrogram(times=times, freqs=freqs, db=db.astype(np.float32), scale=p.scale)
-
-
-def difference_db(a: Spectrogram, b: Spectrogram, floor_db: float) -> np.ndarray:
-    """a − b in dB, both floored first so silent regions don't produce huge differences."""
-    return (np.maximum(a.db, floor_db) - np.maximum(b.db, floor_db)).astype(np.float32)
 
 
 def ltas(x: np.ndarray, sr: int, n_fft: int = 2048, window: str = "hann") -> tuple[np.ndarray, np.ndarray]:

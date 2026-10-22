@@ -249,8 +249,8 @@ DATA_DIR=../linear_baseline/outputs docker compose up
 ```
 
 - Each run shows up as a set of keys `<run_name>/<stem>`, for example `ridge_28spk/p232_001`, so several runs can be compared side by side.
-- To look at a single run, point `DATA_DIR` at that run folder instead, or change the root in the viewer's sidebar.
-- The viewer computes SNR, SI-SDR, PESQ (wide-band at 16 kHz) and STOI live. Its **batch export** writes a CSV with these metrics for every triplet under `diagnostic_viewer/exports/`.
+- To look at a single run, point `DATA_DIR` at that run folder instead.
+- The viewer computes SNR, SI-SDR, PESQ (wide-band at 16 kHz) and STOI live for the file on screen. To score every file of every run, use `make evaluate` (metric suite).
 - `DATA_DIR` is mounted read-only into the container. The viewer never modifies the run folders.
 
 ---
@@ -362,7 +362,7 @@ Checked with the diagnostic viewer's own `discover()` and `validate_strict()`. E
 | `56spk` | 8.45 → 4.64 | 8.45 → 1.50 |
 | `both` | 8.45 → 4.74 | 8.45 → 1.51 |
 
-The log-magnitude error roughly halves, but these waveform metrics go *down*. That comes from the log-domain resynthesis, not a training bug; see §14. Use the viewer's batch export for PESQ and STOI.
+The log-magnitude error roughly halves, but these waveform metrics go *down*. That comes from the log-domain resynthesis, not a training bug; see §14. Use `make evaluate` (metric suite) for PESQ and STOI.
 
 ### 12.3 Other checks performed
 - `--skip-train --model …/model.npz` reproduces the full run's enhanced wavs byte-for-byte.

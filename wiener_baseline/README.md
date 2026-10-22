@@ -58,10 +58,10 @@ A full test-set run writes 16 kHz clean, noisy and processed files, about 200 MB
 
 ## View in diagnostic_viewer
 
-Run `make viewer` from the project folder, or set the viewer's sidebar data
-folder (or `DATA_DIR` for Docker) to one run folder, e.g. `wiener_baseline/outputs/wiener_leading_test`,
-and press **Rescan folder**. You can also point it at `outputs/` itself: the runs then show up as
-`wiener_leading_test/p232_001`, `oracle_test/p232_001`, and so on. Use the viewer's batch export for PESQ / STOI.
+Run `make viewer` from the project folder, or set `DATA_DIR` (in `diagnostic_viewer/.env`) to one run
+folder, e.g. `wiener_baseline/outputs/wiener_leading_test`, and reload the page. You can also point it at
+`outputs/` itself: the runs then show up as `wiener_leading_test/p232_001`, `oracle_test/p232_001`, and
+so on. For PESQ / STOI over whole runs, use `make evaluate` (metric suite).
 
 To compare the neural net later, write its outputs as `outputs/<nn-run>/processed/<stem>.wav`,
 next to copies of `clean/` and `noisy/`, in the same way.
