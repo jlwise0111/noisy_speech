@@ -22,7 +22,7 @@ DS=/path/to/valentini_noisy_speech_database
 ```
 
 `--resume` continues an interrupted run from `outputs/<run>/last.pt`. The first run caches 16 kHz waveforms
-in `../.cache/speechprep` (about 4 GB for 28spk + test, under a minute on 16 cores). Run names must not contain
+in `../.cache/speechprep` (about 4 GB for 28spk + test, filled in parallel on every available core). Run names must not contain
 `train`, because the metric suite skips such folders.
 
 ## Pipeline
@@ -38,6 +38,19 @@ in `../.cache/speechprep` (about 4 GB for 28spk + test, under a minute on 16 cor
 | Selection | best validation loss on held-out speakers (28spk seed 0: p256, p279, p287, same as Ridge). Unweighted speech/silent MSE is logged too, so runs with different silence weights stay comparable |
 | Output | `outputs/<run>/{clean,noisy,enhanced}/<stem>.wav` at 16 kHz, plus `best.pt`, `last.pt`, `history.csv`, `config.json` |
 
-Device: `--device auto` picks CUDA, then MPS, then CPU. On the project's Intel Mac the AMD GPU (MPS) runs a
-16 × 256 batch in about 1.6 s, against 3.0 s on the CPU. A full 28spk epoch (652 batches + validation)
-takes about 20 minutes.
+Device: `--device auto` picks CUDA, then MPS, then CPU. No GPU is required; the CPU path is the baseline and
+gives the same results.
+
+Parallelism is sized from the cores Python reports at runtime (`os.process_cpu_count()`), so nothing is
+tuned to one machine:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--workers` | `-1` → `min(4, (cores − 1) // 2)` | DataLoader processes preparing training batches in the background |
+| `--val-workers` | `1` | DataLoader processes for validation |
+| `--threads` | `0` → cores left after the workers | torch intra-op threads (the main CPU-training lever) |
+| `--prefetch-factor` | `4` | batches each worker keeps ready |
+
+Workers + threads never exceed the core count, so the loaders and the model do not fight for the CPU. The
+project pipeline (`make pipeline`) runs the baselines first, then trains `unet_28spk`, `unet_56spk` and
+`unet_both` one after another, each with every core.

@@ -3,3 +3,8 @@
 .cache/
 valentini_eda/
 .idea/
+logs/
+local.mk
+__pycache__/
+# planning notes stay local
+PLAN*.md

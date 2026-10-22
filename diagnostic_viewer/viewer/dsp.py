@@ -1,4 +1,4 @@
-"""Signal analysis: spectrograms, difference spectrograms, LTAS, level envelope, stats."""
+"""Signal analysis: spectrograms, LTAS, level envelope, stats."""
 
 from __future__ import annotations
 
@@ -109,11 +109,6 @@ def spectrogram(x: np.ndarray, sr: int, p: StftParams) -> Spectrogram:
     return Spectrogram(times=times, freqs=freqs, db=db.astype(np.float32), scale=p.scale)
 
 
-def difference_db(a: Spectrogram, b: Spectrogram, floor_db: float) -> np.ndarray:
-    """a − b in dB, both floored first so silent regions don't produce huge differences."""
-    return (np.maximum(a.db, floor_db) - np.maximum(b.db, floor_db)).astype(np.float32)
-
-
 def ltas(x: np.ndarray, sr: int, n_fft: int = 2048, window: str = "hann") -> tuple[np.ndarray, np.ndarray]:
     """Long-term average spectrum (Welch PSD) in dB/Hz."""
     nper = min(n_fft, len(x))
@@ -195,7 +190,7 @@ def integrated_loudness(x: np.ndarray, sr: int) -> float:
     return float(lufs(z.mean()))
 
 
-def loudness_match_gains(loudness: list[float], peaks: list[float], target_lufs: float = -16.0,
+def loudness_match_gains(loudness: list[float], peaks: list[float], target_lufs: float = -20.0,
                          ceiling_dbfs: float = -1.0) -> tuple[list[float], float]:
     """Gains (dB) that bring every track to the same loudness, ideally `target_lufs`.
 

@@ -8,7 +8,8 @@ clean / noisy / processed triplets in the layout `diagnostic_viewer` reads.
 
 ## Algorithm
 
-All processing is done per STFT bin. Defaults: Hann window, 32 ms frames, 75% overlap.
+The filter runs at **16 kHz only**: Valentini's 48 kHz files are resampled on load, the rate every model in
+the project uses, and any other rate is refused. All processing is done per STFT bin. Defaults: Hann window, 32 ms frames (512 samples), 75% overlap.
 
 1. **Noise PSD estimate** `N(f)`
    - `leading` (default): mean power over the first 0.25 s. Valentini clips start with a short pause.
@@ -27,7 +28,7 @@ Requires numpy, scipy and soundfile (`pip install -r requirements.txt`).
 
 ```bash
 cd wiener_baseline
-DATA="/Volumes/Banton Glyph RAID 2TB/USF/Classes/06 Fall 2026/Machine Learning/Group Project/audio_data_sets/valentini_noisy_speech_database"
+DATA="/path/to/valentini_noisy_speech_database"     # or: export VALENTINI_DIR=...
 
 python run_baseline.py --dataset "$DATA" --split test --limit 10      # quick smoke run
 python run_baseline.py --dataset "$DATA" --split test                 # full 824-file test set
@@ -36,7 +37,9 @@ python run_baseline.py --dataset "$DATA" --split test --method oracle # upper bo
 ```
 
 - `--split`: `test`, `train28` or `train56`.
-- `--jobs`: number of parallel processes (default: all cores).
+- `--jobs`: number of parallel processes (default: every core available to the process).
+- `--cache-dir`: read 16 kHz waveforms from the shared `speechprep` cache (`../.cache/speechprep`) instead of
+  resampling each file again. `make pipeline` sets this.
 - Every `WienerParams` field can be set from the command line, e.g. `--gain-floor-db -15 --alpha 0.95`.
 - The dataset is only read. The script refuses to write inside it.
 
@@ -44,36 +47,39 @@ Output, which is gitignored:
 
 ```
 outputs/<method>_<noise-est>_<split>/
-    clean/<stem>.wav      copied from the dataset
-    noisy/<stem>.wav      copied from the dataset
-    processed/<stem>.wav  Wiener output: 48 kHz mono PCM_16, same length as noisy
+    clean/<stem>.wav      dataset file, resampled to 16 kHz
+    noisy/<stem>.wav      dataset file, resampled to 16 kHz
+    processed/<stem>.wav  Wiener output: 16 kHz mono PCM_16, same length as noisy
     params.json           settings + git commit
     quick_metrics.csv     per-file SNR / SI-SDR (numpy-only sanity check)
 ```
 
-A full test-set run copies the clean and noisy files, so each run folder takes about 550 MB.
+A full test-set run writes 16 kHz clean, noisy and processed files, about 200 MB per run folder.
 
 ## View in diagnostic_viewer
 
-The viewer lives on the `feature/diagnostic-viewer` branch. Set its sidebar data
-folder (or `DATA_DIR` for Docker) to one run folder, e.g. `wiener_baseline/outputs/wiener_leading_test`,
-and press **Rescan folder**. You can also point it at `outputs/` itself: the runs then show up as
-`wiener_leading_test/p232_001`, `oracle_test/p232_001`, and so on. Use the viewer's batch export for PESQ / STOI.
+Run `make viewer` from the project folder, or set `DATA_DIR` (in `diagnostic_viewer/.env`) to one run
+folder, e.g. `wiener_baseline/outputs/wiener_leading_test`, and reload the page. You can also point it at
+`outputs/` itself: the runs then show up as `wiener_leading_test/p232_001`, `oracle_test/p232_001`, and
+so on. For PESQ / STOI over whole runs, use `make evaluate` (metric suite).
 
 To compare the neural net later, write its outputs as `outputs/<nn-run>/processed/<stem>.wav`,
 next to copies of `clean/` and `noisy/`, in the same way.
 
-## Results: Valentini test set (824 files, from `quick_metrics.csv`)
+## Results: Valentini test set (824 files, 16 kHz)
 
-| Method                     | SNR (dB) | SI-SDR (dB) | Δ SI-SDR |
-|----------------------------|---------:|------------:|---------:|
-| Noisy input                |     8.39 |        8.39 |        — |
-| Wiener, `leading` noise    |    15.91 |       15.76 |    +7.36 |
-| Wiener, `minstats` noise   |    13.24 |       13.03 |    +4.64 |
-| Oracle Wiener (upper bound)|    21.05 |       21.01 |   +12.61 |
+SNR and SI-SDR are from `quick_metrics.csv`; PESQ-WB and STOI are from `make evaluate`
+(`metric_suite/results/summary.md`).
 
-Train splits (Wiener, `leading`): train28 SI-SDR 6.00 → 11.13 dB (+5.13, 11 572 files);
-train56 5.93 → 11.02 dB (+5.09, 23 075 files). See the guide, section 9, for details.
+| Method                     | SNR (dB) | SI-SDR (dB) | Δ SI-SDR | PESQ-WB | STOI  |
+|----------------------------|---------:|------------:|---------:|--------:|------:|
+| Noisy input                |     8.45 |        8.45 |        — |    1.97 | 0.921 |
+| Wiener, `leading` noise    |    16.01 |       15.86 |    +7.41 |    2.42 | 0.912 |
+| Wiener, `minstats` noise   |    13.32 |       13.12 |    +4.67 |    2.31 | 0.908 |
+| Oracle Wiener (upper bound)|    21.08 |       21.04 |   +12.59 |    3.84 | 0.982 |
+
+Train splits (Wiener, `leading`): train28 SI-SDR 6.12 → 11.26 dB (+5.14, 11 572 files);
+train56 6.04 → 11.14 dB (+5.10, 23 075 files). See the guide, section 9, for details.
 
 ## Tests
 
@@ -82,4 +88,6 @@ python -m pytest tests -q
 ```
 
 The tests use synthetic signals only: they check output length, gain bounds, SNR improvement,
-that the oracle beats the blind filter, that silent input stays finite, and that the output stays within [-1, 1].
+that the oracle beats the blind filter, that silent input stays finite, that the output stays within [-1, 1],
+that the filter refuses audio at any rate other than 16 kHz, and that 48 kHz input gives a 16 kHz
+clean / noisy / processed triplet.

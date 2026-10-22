@@ -27,7 +27,7 @@ pip install -r requirements.txt
 pytest -q
 
 DS="/path/to/valentini_noisy_speech_database"
-python ridge_baseline.py --dataset "$DS" --train-set 28spk          # ~40 s on 16 cores (56spk: several minutes, disk-bound)
+python ridge_baseline.py --dataset "$DS" --train-set 28spk          # 56spk takes longer: it is mostly file reading
 python ridge_baseline.py --dataset "$DS" --train-set 56spk
 python ridge_baseline.py --dataset "$DS" --train-set both           # union of both training folders
 ```
@@ -42,6 +42,7 @@ Useful flags:
 | `--limit-files N` / `--test-limit N` | quick smoke runs |
 | `--model outputs/<run>/model.npz --skip-train` | rerun test enhancement only |
 | `--n-fft`, `--hop`, `--sr`, `--workers`, `--out`, `--run-name` | |
+| `--cache-dir ../.cache/speechprep` | read the shared 16 kHz waveform cache instead of re-resampling every file |
 
 ## Output
 ```
@@ -60,4 +61,4 @@ outputs/<run_name>/                 # default: ridge_<train-set>_<YYYYmmdd_HHMMS
 cd ../diagnostic_viewer
 DATA_DIR=../linear_baseline/outputs docker compose up
 ```
-Each run folder shows up as `<run_name>/<stem>` triplets. The viewer's batch export computes SNR, SI-SDR, PESQ and STOI for a whole run.
+Each run folder shows up as `<run_name>/<stem>` triplets. To score SNR, SI-SDR, PESQ and STOI over whole runs, use `make evaluate` (metric suite).

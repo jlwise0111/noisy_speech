@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import random
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +40,10 @@ class TrainConfig:
     silence_db: float = 30.0       # silent = clean frame energy this far below the utterance peak
     target: str = "irm"            # "irm" or "psm"
     base_channels: int = 16
-    workers: int = 4
+    workers: int = -1              # DataLoader processes for training crops (-1 = from the CPU count)
+    val_workers: int = 1           # DataLoader processes for validation (whole utterances, batch 1)
+    threads: int = 0               # torch intra-op threads (0 = the cores the loader workers leave free)
+    prefetch_factor: int = 4       # batches each worker keeps ready, so the model never waits on loading
     seed: int = 0
     device: str = "auto"
 
@@ -53,6 +57,29 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def available_cores() -> int:
+    """Cores this process may use (respects CPU affinity and container limits where Python can see them)."""
+    count = getattr(os, "process_cpu_count", None) or os.cpu_count
+    return max(1, count() or 1)
+
+
+def resolve_parallelism(cfg: TrainConfig, cores: int | None = None) -> TrainConfig:
+    """Fill in the automatic worker and thread counts so loaders + torch never exceed `cores`.
+
+    The loader workers and torch's own threads compete for the same cores. Left at their defaults
+    (a fixed worker count plus one torch thread per core), they oversubscribe the CPU and thrash."""
+    cores = cores or available_cores()
+    workers = cfg.workers if cfg.workers >= 0 else min(4, (cores - 1) // 2)
+    threads = cfg.threads if cfg.threads > 0 else max(1, cores - workers)
+    return replace(cfg, workers=workers, threads=threads)
+
+
+def apply_threads(cfg: TrainConfig) -> None:
+    """Cap torch's CPU threads at cfg.threads (call after resolve_parallelism)."""
+    if cfg.threads > 0:
+        torch.set_num_threads(cfg.threads)
+
+
 def pick_device(name: str) -> torch.device:
     if name == "auto":
         if torch.cuda.is_available():
@@ -62,11 +89,14 @@ def pick_device(name: str) -> torch.device:
 
 
 def make_loader(dataset, cfg: TrainConfig, train: bool) -> DataLoader:
+    """Workers load and transform the next batches in the background while the current one trains."""
     g = torch.Generator()
     g.manual_seed(cfg.seed)
+    workers = max(0, cfg.workers if train else cfg.val_workers)
+    extra = {"persistent_workers": True, "prefetch_factor": cfg.prefetch_factor} if workers else {}
     return DataLoader(dataset, batch_size=cfg.batch_size if train else 1, shuffle=train,
-                      num_workers=cfg.workers, generator=g, drop_last=train,
-                      persistent_workers=cfg.workers > 0, pin_memory=torch.cuda.is_available())
+                      num_workers=workers, generator=g, drop_last=train,
+                      pin_memory=torch.cuda.is_available(), **extra)
 
 
 def _to(batch, device):
@@ -116,6 +146,8 @@ def evaluate(model, loader, cfg: TrainConfig, device) -> dict:
 
 def fit(train_ds, val_ds, norm: dict, cfg: TrainConfig, run_dir: Path, resume: bool = False, log=print) -> Path:
     """Train, keep the best checkpoint by validation loss, return its path."""
+    cfg = resolve_parallelism(cfg)
+    apply_threads(cfg)
     seed_everything(cfg.seed)
     device = pick_device(cfg.device)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -149,7 +181,8 @@ def fit(train_ds, val_ds, norm: dict, cfg: TrainConfig, run_dir: Path, resume: b
     elif hist_path.exists():
         hist_path.unlink()
 
-    log(f"device {device}, {sum(p.numel() for p in model.parameters()):,} parameters, "
+    log(f"device {device}, {cfg.threads} torch thread(s), {cfg.workers}+{cfg.val_workers} loader workers")
+    log(f"{sum(p.numel() for p in model.parameters()):,} parameters, "
         f"{len(train_ds)} train / {len(val_ds)} val files, {len(train_loader)} batches per epoch")
     for epoch in range(start, cfg.epochs + 1):
         t0 = time.time()

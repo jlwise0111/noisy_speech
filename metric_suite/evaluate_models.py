@@ -34,10 +34,23 @@ def parse_args(argv=None):
     ap.add_argument("--ref-pesq", type=float, default=1.50, help="fixed noisy reference for PESQ-WB")
     ap.add_argument("--ref-stoi", type=float, default=0.83, help="fixed noisy reference for STOI")
     ap.add_argument("--limit", type=int, help="score only the first N files of each run")
-    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    ap.add_argument("--workers", type=int,
+                    default=max(1, ((getattr(os, "process_cpu_count", None) or os.cpu_count)() or 2) - 1),
+                    help="parallel scoring processes, shared by all runs (default: available cores minus one)")
     ap.add_argument("--force", action="store_true", help="rescore even if cached results are up to date")
     ap.add_argument("--out", type=Path, default=HERE / "results")
     return ap.parse_args(argv)
+
+
+def shown_root(root: Path) -> str:
+    """A folder as printed in reports and on screen: relative to the project folder, never an absolute path."""
+    root, project = root.resolve(), HERE.parent.resolve()
+    if root == project:
+        return "the project folder"
+    try:
+        return root.relative_to(project).as_posix()
+    except ValueError:
+        return root.name
 
 
 def main(argv=None) -> int:
@@ -45,26 +58,25 @@ def main(argv=None) -> int:
     t0 = time.time()
     found = runs.find_runs(args.root, args.include, args.exclude or None)
     if not found:
-        print(f"No runs found under {args.root} (include={args.include!r}, exclude={args.exclude!r}).")
+        print(f"No runs found under {shown_root(args.root)} (include={args.include!r}, exclude={args.exclude!r}).")
         return 1
-    print(f"Found {len(found)} run(s) under {args.root.resolve()}:")
+    print(f"Found {len(found)} run(s) under {shown_root(args.root)}:")
     args.out.mkdir(parents=True, exist_ok=True)
 
-    summaries = []
     with Pool(args.workers) as pool:
-        for run in found:
-            rows = evaluate.evaluate_run(run, args.out, pool, args.limit, args.force)
-            summaries.append(evaluate.summarize(run, rows, args.ref_pesq, args.ref_stoi))
+        all_rows = evaluate.evaluate_runs(found, args.out, pool, args.limit, args.force)
+    summaries = [evaluate.summarize(run, rows, args.ref_pesq, args.ref_stoi) for run, rows in zip(found, all_rows)]
     order = {name: i for i, (name, _) in enumerate(runs.SYSTEMS)}
     summaries.sort(key=lambda s: (order.get(s["system"], len(order)), s["run"]))
 
     evaluate.write_summary_csv(args.out / "summary.csv", summaries)
     (args.out / "summary.md").write_text(
-        evaluate.markdown_report(summaries, args.ref_pesq, args.ref_stoi, args.root.resolve()))
+        evaluate.markdown_report(summaries, args.ref_pesq, args.ref_stoi, shown_root(args.root)))
     print()
     print(evaluate.terminal_table(summaries, args.ref_pesq, args.ref_stoi))
-    print(f"\nWrote {args.out / 'summary.md'}, {args.out / 'summary.csv'} and per-file CSVs in "
-          f"{args.out / 'runs'} ({time.time() - t0:.0f} s)")
+    out = shown_root(args.out)
+    print(f"\nWrote {out}/summary.md, {out}/summary.csv and per-file CSVs in "
+          f"{out}/runs ({time.time() - t0:.0f} s)")
     return 0
 
 

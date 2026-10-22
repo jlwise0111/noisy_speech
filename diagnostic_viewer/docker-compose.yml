@@ -6,4 +6,3 @@ services:
       - "127.0.0.1:${PORT:-8501}:8501"
     volumes:
       - "${DATA_DIR:-..}:/data:ro"
-      - "./exports:/exports"

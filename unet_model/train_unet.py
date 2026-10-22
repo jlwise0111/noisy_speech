@@ -37,7 +37,7 @@ from speechprep import WaveCache, split_by_speaker, test_pairs, train_pairs  # n
 from unet import TrainConfig, fit, load_model, n_parameters  # noqa: E402
 from unet.dataset import PairDataset, input_stats  # noqa: E402
 from unet.enhance import enhance_pairs  # noqa: E402
-from unet.train import pick_device  # noqa: E402
+from unet.train import apply_threads, available_cores, pick_device, resolve_parallelism  # noqa: E402
 
 
 def parse_args(argv=None):
@@ -98,7 +98,7 @@ def git_commit() -> str | None:
 def new_run_info(args, cfg, run_name: str) -> dict:
     """Start the record of this run. It grows as the run goes and is saved as config.json."""
 
-    return {"run_name": run_name, "dataset": str(args.dataset), "train_set": args.train_set,
+    return {"run_name": run_name, "dataset": Path(args.dataset).name, "train_set": args.train_set,
            "git_commit": git_commit(), "config": cfg.to_dict(), "torch": torch.__version__}
 
 
@@ -131,14 +131,14 @@ def limit_pairs(pairs, train, val, limit, seed: int):
     return train, val
 
 
-def warm_cache(cache, pair_lists) -> int:
+def warm_cache(cache, pair_lists, workers: int) -> int:
     """Resample every needed file to 16 kHz once, in parallel, before training starts.
 
     Reading and resampling 48 kHz audio is the slow part of loading. Done once here, every epoch
     afterward reads small .npy files."""
 
     paths = [p for pairs in pair_lists for _, clean, noisy in pairs for p in (clean, noisy)]
-    return cache.warm(paths)
+    return cache.warm(paths, workers)
 
 
 def normalization_stats(train, cache, args, cfg) -> dict:
@@ -188,10 +188,19 @@ def enhance_test(checkpoint: Path, test, cache, run_dir: Path, cfg, info: dict) 
 
     device = pick_device(cfg.device)
     model = load_model(checkpoint, device)
-    info["checkpoint"] = str(checkpoint)
+    info["checkpoint"] = portable(checkpoint)
     info["n_parameters"] = n_parameters(model)
     enhance_pairs(model, test, cache, run_dir, device)
     info["n_test"] = len(test)
+
+
+def portable(path: Path) -> str:
+    """`path` relative to the project folder when it is inside it, so config.json names no machine."""
+    path = Path(path).resolve()
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return path.name
 
 
 def write_json(path: Path, obj) -> None:
@@ -208,6 +217,8 @@ def main(argv=None):
     args = parse_args(argv)
     check_paths(args)
     cfg = TrainConfig(**{f.name: getattr(args, f.name) for f in dataclasses.fields(TrainConfig)})
+    cfg = resolve_parallelism(cfg)
+    apply_threads(cfg)
     run_name = args.run_name or f"unet_{args.train_set}_{time.strftime('%Y%m%d_%H%M%S')}"
     run_dir = args.out / run_name
     cache = WaveCache(args.cache_dir)
@@ -222,7 +233,8 @@ def main(argv=None):
         if not train or not val:
             sys.exit(f"Empty split: {len(train)} train / {len(val)} val files")
         print(f"{len(train)} train / {len(val)} val files; validation speakers {', '.join(held)}")
-        n_new = warm_cache(cache, [train, val] + ([] if args.skip_test else [test]))
+        n_new = warm_cache(cache, [train, val] + ([] if args.skip_test else [test]),
+                           max(1, min(available_cores(), cfg.workers + cfg.threads)))
         print(f"16 kHz cache: {n_new} file(s) added under {cache.root}")
         norm = normalization_stats(train, cache, args, cfg)
         info.update(val_speakers=held, n_train=len(train), n_val=len(val),

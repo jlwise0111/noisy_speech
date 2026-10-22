@@ -39,7 +39,7 @@ in either layout, at any depth:
 | subfolders | `exp1/clean/p232_001.wav`, `exp1/noisy/p232_001.wav`, `exp1/enhanced/p232_001.wav` |
 | suffix     | `p232_001_clean.wav`, `p232_001_noisy.wav`, `p232_001_processed.wav`           |
 
-Role aliases can be edited in the sidebar under **Role naming**. The defaults are:
+Both layouts are detected automatically. The role names recognised are (`DEFAULT_*_ALIASES` in `viewer/dataset.py`):
 - folders: `clean`, `noisy`, and `processed`/`enhanced`/`denoised`/`output`
 - suffixes: `clean`, `noisy`, and `processed`/`enhanced`/`denoised`
 
@@ -50,19 +50,24 @@ triplet from any three files.
 ### Systems and runs
 
 Every folder that contains a triplet is a **run**, for example `linear_baseline/outputs/ridge_28spk`.
+Folders whose name starts with `smoke_` (the few-file runs from `make pipeline-smoke`) are not
+shown, so every run listed is a real result.
 Each run is assigned to a **system** by the words in its folder path:
 
 | System | Folder words | Example run folder |
 |---|---|---|
-| Neural network | `neural`, `nn`, `dnn`, `network`, `unet` | `neural_network/outputs/crn_v1/` |
+| Neural network | `neural`, `nn`, `dnn`, `network`, `unet` | `unet_model/outputs/unet_28spk/` |
 | Wiener baseline | `wiener`, `oracle` | `wiener_baseline/outputs/wiener_leading_test/` |
 | Ridge baseline | `ridge`, `linear` | `linear_baseline/outputs/ridge_28spk/` |
 | Other | anything else | `diagnostic_viewer/data/demo/subfolders/` |
 
-The rules are in `viewer/systems.py`. The header always lists all three project systems. A system
-with no outputs yet (currently the neural network) shows where to write them. Each run carries its
-own `clean/` and `noisy/` copies, so systems working at different sample rates (Wiener at 48 kHz,
-Ridge at 16 kHz) each stay strictly comparable.
+The rules are in `viewer/systems.py`. The header always lists all three project systems; one with
+no outputs yet shows where to write them. All three systems write their outputs at 16 kHz. Each
+run also carries its own `clean/` and `noisy/` copies, so a run at any other sample rate would
+still be compared strictly against its own references.
+
+The folder is scanned when a browser tab opens (or is reloaded). Outputs written while the viewer
+is open, for example a model that finishes training later, appear after a page reload.
 
 **Strict comparison:** files must match exactly in sample rate, channel count and length
 (in samples). If they don't, the app shows the exact mismatch and refuses to render.
@@ -70,14 +75,15 @@ Resample or trim the files before loading them.
 
 ## Using it
 
-The screen has three areas: the stacked spectrograms on the left, a numbers panel on the right, and a transport bar below the spectrograms.
+The screen has three areas: the stacked spectrograms on the left, a numbers panel on the right, and a transport bar above the spectrograms.
 
 - **Header, top row:**
   - **System** (Neural network / Wiener baseline / Ridge baseline) and **Run** (shown by run name; hover ⓘ for every run's full path and file count). Switching either keeps the same file (e.g. `p232_001`) selected when the new run has it, so you can A/B systems on identical audio.
-  - **Match loudness** toggle (−16 LUFS; details in its ⓘ tooltip): plays *and draws* every track at the same integrated loudness (ITU-R BS.1770 / EBU R128 gating), so a processor that makes things quieter can be judged on sound quality alone. If reaching −16 LUFS would push any track's peak above −1 dBFS, all three are lowered by the same amount and the achieved level is shown. Waveforms, spectrograms, levels, long-term spectrum and loudness-over-time all follow the gain. **Quality scores always use the original files.**
+  - **Match loudness** toggle (−20 LUFS; details in its ⓘ tooltip): plays *and draws* every track at the same integrated loudness (ITU-R BS.1770 / EBU R128 gating), so a processor that makes things quieter can be judged on sound quality alone. If reaching −20 LUFS would push any track's peak above −1 dBFS, all three are lowered by the same amount and the achieved level is shown. Waveforms, spectrograms, levels, long-term spectrum and loudness over time all follow the gain. **Quality scores always use the original files.**
 - **Header, second row:** a coloured badge with the **system** and **run** you are looking at and listening to, the file name, ◀/▶ and the file picker. The processed track's label and the line under the transport also name the system and run.
 
-- **Spectrograms:** one panel per track, with the waveform overlaid as in iZotope RX.
+- **Spectrograms:** one panel per track (clean, noisy, processed, top to bottom), with the waveform overlaid as in iZotope RX.
+  - Hover over a panel for a tooltip beside the cursor with the time, frequency, level and track under it.
   - Drag on any panel to zoom; the panels zoom together.
   - Click a panel to seek.
   - Click a panel's label to listen to that track.
@@ -87,22 +93,20 @@ The screen has three areas: the stacked spectrograms on the left, a numbers pane
   - Volume.
   - Zoom −/fit/+ (keys `-` `0` `+`) and *follow*.
 - **Numbers panel:**
-  - **Cursor:** time, frequency and level under the mouse.
   - **Quality vs clean:** Separation (SI-SDR), Quality (PESQ) and Intelligibility (STOI) for noisy and processed, with a ▲/▼ change badge.
   - **Levels per track:** loudness (LUFS), match gain, peak, RMS, max RMS, noise floor (how quiet the pauses are), clipped samples and DC offset.
-- **Header menus:**
-  - **Tracks:** display order and role assignment. Scores follow the roles, not the order.
-  - **⚙ Display:** frequency scale, time/pitch detail, contrast, colours, waveform overlay, an optional spectrum-at-playhead card, and advanced STFT settings.
-  - Dataset settings are in the collapsed sidebar (`>` at the top left).
-- **Analysis & export** (collapsed drawer below the main view):
+- **Display settings are fixed:** log frequency axis, ≈64 ms Hann window with 1/4 hop, −110 to −20 dB
+  contrast, Ember colours, waveform overlay at 55 % on a shared scale. Change them in `app.py`
+  (display settings section) if needed.
+- The data folder is the one set by `DATA_DIR` in `.env` (mounted read-only at `/data`); there are no
+  on-screen dataset settings.
+- **Analysis** (drawer below the main view, open from the start):
 
 | Tab | Contents |
 |---|---|
-| Differences | `processed − clean` and `processed − noisy` in dB. Red means more energy (residual noise or artefacts); blue means less (removed speech) |
 | Long-term spectrum | Average spectrum of each file |
 | Loudness over time | 20 ms RMS; reveals gating and pumping |
 | All metrics | Full table, including SNR, with notes |
-| Export | Stacked figure as PNG/SVG, metrics CSV for this triplet, and batch CSV over every file in the current run. Files are also written to `./exports` |
 
 ### Metric notes
 
@@ -129,7 +133,6 @@ docker compose run --rm -v ./:/app viewer pytest -q
 | `viewer/dsp.py` | STFT, mel, LTAS, envelope, stats, BS.1770 loudness and matching |
 | `viewer/metrics.py` | Metrics |
 | `viewer/figures.py` | Plotly figures |
-| `viewer/export.py` | Figure export and CSV |
 | `viewer/player/` | Web Audio + Plotly.js player that runs in the browser |
 
 `PLAN.md` is the accepted design plan.

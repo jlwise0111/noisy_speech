@@ -1,7 +1,7 @@
 """Synced multi-track player: spectrogram panels, numbers panel and transport in one iframe.
 
 Streamlit reruns can't animate a playhead smoothly, so playback, the playhead, the cursor
-readout and the spectrum-at-playhead card all run client-side. Python only ships the data.
+tooltip and the spectrum-at-playhead card all run client-side. Python only ships the data.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ _TEMPLATE = (Path(__file__).parent / "player.html").read_text(encoding="utf-8")
 PLOTLY_SRC = "/app/static/plotly.min.js"  # written into ./static by the Dockerfile
 TRANSPORT_PX = 96  # transport bar (two lines) + grid gap
 SLICE_CARD_PX = 270
-PANEL_PX = 610  # cursor + quality + levels cards
+PANEL_PX = 480  # quality + levels cards
 
 
 def _encode_heatmaps(fig: go.Figure) -> dict:

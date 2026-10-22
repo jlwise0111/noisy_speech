@@ -12,6 +12,10 @@ estimating those powers from the noisy signal alone.
 It is not a real baseline, only an upper bound on what this filter family
 can reach.
 
+The filter runs at 16 kHz only (SR): 32 ms frames are 512 samples with a
+128-sample hop, the same grid as every other model in the project. Resample
+before calling it (wiener.audio_io.read_wav does); any other rate is an error.
+
 Algorithm details and tuning notes: wiener_baseline/docs/wiener_baseline.md (section 6).
 """
 from __future__ import annotations
@@ -23,6 +27,7 @@ from scipy.ndimage import minimum_filter1d
 from scipy.signal import istft, stft
 
 EPS = 1e-12
+SR = 16000  # the only sample rate the filter runs at
 
 
 @dataclass
@@ -41,7 +46,15 @@ class WienerParams:
         return asdict(self)
 
 
+def check_sr(sr: int) -> None:
+    """The filter is tuned and documented for 16 kHz; refuse anything else instead of silently running at it."""
+    if sr != SR:
+        raise ValueError(f"the Wiener filter runs at {SR} Hz only, got {sr} Hz: resample first "
+                         "(wiener.audio_io.read_wav does)")
+
+
 def _stft_cfg(sr: int, p: WienerParams) -> tuple[int, int]:
+    check_sr(sr)
     nperseg = int(round(sr * p.frame_ms / 1000.0))
     noverlap = int(round(nperseg * p.overlap))
     return nperseg, noverlap

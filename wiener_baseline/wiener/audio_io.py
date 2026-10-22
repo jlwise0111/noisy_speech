@@ -5,10 +5,14 @@ The dataset is only ever read from; outputs are written elsewhere.
 from __future__ import annotations
 
 import sys
+from math import gcd
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.signal import resample_poly
+
+from .wiener import SR  # Valentini is 48 kHz; the filter runs at 16 kHz (PESQ-WB's rate, 3x less work)
 
 # split name -> (noisy folder, clean folder)
 SPLITS = {
@@ -41,11 +45,18 @@ def find_pairs(dataset_root: Path, split: str) -> list[tuple[str, Path, Path]]:
 
 
 def read_wav(path: Path) -> tuple[np.ndarray, int]:
-    """Read a mono WAV as float32 in [-1, 1]."""
-    x, sr = sf.read(path, dtype="float32", always_2d=True)
+    """Read a mono WAV as float32 in [-1, 1], resampled to 16 kHz. Returns (signal, SR).
+
+    Resampling is the same polyphase filter as speechprep.load_audio, so a waveform read here is
+    identical to the one in the shared 16 kHz cache."""
+    x, file_sr = sf.read(path, dtype="float32", always_2d=True)
     if x.shape[1] != 1:
         raise ValueError(f"expected mono, got {x.shape[1]} channels: {path}")
-    return x[:, 0], sr
+    x = x[:, 0]
+    if file_sr == SR:
+        return x, SR
+    g = gcd(SR, file_sr)
+    return resample_poly(x, SR // g, file_sr // g).astype(np.float32), SR
 
 
 def write_wav(path: Path, x: np.ndarray, sr: int) -> None:

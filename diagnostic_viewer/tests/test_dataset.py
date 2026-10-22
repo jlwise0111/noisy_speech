@@ -56,11 +56,12 @@ def test_nested_subfolder_layout(tmp_path):
     assert t.resolved and t.stem == "exp1/a"
 
 
-def test_hidden_and_cache_folders_are_skipped(tmp_path):
+def test_hidden_cache_and_smoke_folders_are_skipped(tmp_path):
     for role in ("clean", "noisy", "processed"):
         _wav(tmp_path / "run" / role / "a.wav")
         _wav(tmp_path / ".venv" / "run" / role / "b.wav")  # e.g. scipy's test wavs in a virtualenv
         _wav(tmp_path / "__pycache__" / role / "c.wav")
+        _wav(tmp_path / "outputs" / "smoke_run" / role / "d.wav")  # make pipeline-smoke output
     (tmp_path / "run" / "clean" / "._a.wav").write_bytes(b"macOS resource fork")
     assert [t.stem for t in discover(tmp_path)] == ["run/a"]
     assert len(list_wavs(tmp_path)) == 3
