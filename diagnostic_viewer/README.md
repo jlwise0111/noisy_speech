@@ -76,14 +76,15 @@ Resample or trim the files before loading them.
 
 ## Using it
 
-The screen has three areas: the stacked spectrograms on the left, a numbers panel on the right, and a transport bar below the spectrograms.
+The screen has three areas: the stacked spectrograms on the left, a numbers panel on the right, and a transport bar above the spectrograms.
 
 - **Header, top row:**
   - **System** (Neural network / Wiener baseline / Ridge baseline) and **Run** (shown by run name; hover ⓘ for every run's full path and file count). Switching either keeps the same file (e.g. `p232_001`) selected when the new run has it, so you can A/B systems on identical audio.
-  - **Match loudness** toggle (−16 LUFS; details in its ⓘ tooltip): plays *and draws* every track at the same integrated loudness (ITU-R BS.1770 / EBU R128 gating), so a processor that makes things quieter can be judged on sound quality alone. If reaching −16 LUFS would push any track's peak above −1 dBFS, all three are lowered by the same amount and the achieved level is shown. Waveforms, spectrograms, levels, long-term spectrum and loudness-over-time all follow the gain. **Quality scores always use the original files.**
+  - **Match loudness** toggle (−20 LUFS; details in its ⓘ tooltip): plays *and draws* every track at the same integrated loudness (ITU-R BS.1770 / EBU R128 gating), so a processor that makes things quieter can be judged on sound quality alone. If reaching −20 LUFS would push any track's peak above −1 dBFS, all three are lowered by the same amount and the achieved level is shown. Waveforms, spectrograms, levels, long-term spectrum and loudness over time all follow the gain. **Quality scores always use the original files.**
 - **Header, second row:** a coloured badge with the **system** and **run** you are looking at and listening to, the file name, ◀/▶ and the file picker. The processed track's label and the line under the transport also name the system and run.
 
-- **Spectrograms:** one panel per track, with the waveform overlaid as in iZotope RX.
+- **Spectrograms:** one panel per track (clean, noisy, processed, top to bottom), with the waveform overlaid as in iZotope RX.
+  - Hover over a panel for a tooltip beside the cursor with the time, frequency, level and track under it.
   - Drag on any panel to zoom; the panels zoom together.
   - Click a panel to seek.
   - Click a panel's label to listen to that track.
@@ -93,22 +94,19 @@ The screen has three areas: the stacked spectrograms on the left, a numbers pane
   - Volume.
   - Zoom −/fit/+ (keys `-` `0` `+`) and *follow*.
 - **Numbers panel:**
-  - **Cursor:** time, frequency and level under the mouse.
   - **Quality vs clean:** Separation (SI-SDR), Quality (PESQ) and Intelligibility (STOI) for noisy and processed, with a ▲/▼ change badge.
   - **Levels per track:** loudness (LUFS), match gain, peak, RMS, max RMS, noise floor (how quiet the pauses are), clipped samples and DC offset.
-- **Header menus:**
-  - **Tracks:** display order and role assignment. Scores follow the roles, not the order.
-  - **⚙ Display:** frequency scale, time/pitch detail, contrast, colours, waveform overlay, an optional spectrum-at-playhead card, and advanced STFT settings.
-  - Dataset settings are in the collapsed sidebar (`>` at the top left).
-- **Analysis & export** (collapsed drawer below the main view):
+- **Display settings are fixed:** log frequency axis, ≈64 ms Hann window with 1/4 hop, −110 to −20 dB
+  contrast, Ember colours, waveform overlay at 55 % on a shared scale. Change them in `app.py`
+  (display settings section) if needed.
+- Dataset settings are in the collapsed sidebar (`>` at the top left).
+- **Analysis** (collapsed drawer below the main view):
 
 | Tab | Contents |
 |---|---|
-| Differences | `processed − clean` and `processed − noisy` in dB. Red means more energy (residual noise or artefacts); blue means less (removed speech) |
 | Long-term spectrum | Average spectrum of each file |
 | Loudness over time | 20 ms RMS; reveals gating and pumping |
 | All metrics | Full table, including SNR, with notes |
-| Export | Stacked figure as PNG/SVG, metrics CSV for this triplet, and batch CSV over every file in the current run. Files are also written to `./exports` |
 
 ### Metric notes
 

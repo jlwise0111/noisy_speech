@@ -32,17 +32,12 @@ def test_app_renders_metrics(data_dir):
     assert list(df["metric"]) == ["SNR (dB)", "SI-SDR (dB)", "PESQ", "STOI"]
 
 
-def test_role_swap_and_reorder(data_dir):
+def test_fixed_display_no_settings_menus(data_dir):
     at = AppTest.from_file(APP, default_timeout=120).run()
-    first = at.dataframe[0].value.set_index("metric")
-    # Reorder: move slot 1 down. Metrics must not change (they follow roles).
-    at.button(key="dn_s0_clean").click().run()
-    assert not at.exception
-    after = at.dataframe[0].value.set_index("metric")
-    assert after.loc["SI-SDR (dB)", "processed"] == pytest.approx(first.loc["SI-SDR (dB)", "processed"])
-    # Duplicate a role -> warning, metrics disabled.
-    at.selectbox(key="role_s0_noisy").set_value("clean").run()
-    assert any("exactly once" in w.value for w in at.warning)
+    assert not at.exception, at.exception
+    assert not at.get("popover")  # no Tracks / Display menus: the display settings are fixed
+    assert [e.label for e in at.main.expander] == ["Analysis"]
+    assert [t.label for t in at.tabs] == ["Long-term spectrum", "Loudness over time", "All metrics"]
 
 
 def test_unresolved_triplet_asks_user(data_dir):
@@ -51,13 +46,6 @@ def test_unresolved_triplet_asks_user(data_dir):
     odd = next(i for i, l in enumerate(labels) if "odd" in l)
     at.selectbox(key="tri_idx").set_value(odd).run()  # value = triplet index
     assert any("missing noisy" in w.value for w in at.warning)
-
-
-@pytest.mark.parametrize("scale", ["log", "mel"])
-def test_frequency_scales(data_dir, scale):
-    at = AppTest.from_file(APP, default_timeout=120).run()
-    at.radio(key="scale").set_value(scale).run()
-    assert not at.exception, at.exception
 
 
 def test_figure_export_png_svg():
@@ -144,6 +132,7 @@ def test_loudness_match_toggle(systems_dir):
     before = at.dataframe[0].value.set_index("metric")
     at.toggle(key="match_lufs").set_value(True).run()
     assert not at.exception, at.exception
-    assert any("Loudness matched" in c.value for c in at.caption)
+    assert any("Loudness matched" in c.value and "LUFS" in c.value for c in at.caption)
+    assert "−20 LUFS" in at.toggle(key="match_lufs").help or "-20 LUFS" in at.toggle(key="match_lufs").help
     after = at.dataframe[0].value.set_index("metric")
     assert after.loc["PESQ", "processed"] == before.loc["PESQ", "processed"]  # scores use the files

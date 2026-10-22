@@ -9,9 +9,9 @@
   html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
                font:13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
   #app { display:grid; grid-template-columns:minmax(0,1fr) 300px; grid-template-rows:auto auto; gap:10px; }
-  #main { grid-column:1; grid-row:1; position:relative; border-radius:6px; overflow:hidden; }
+  #main { grid-column:1; grid-row:2; position:relative; border-radius:6px; overflow:hidden; }
   #panel { grid-column:2; grid-row:1 / span 2; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
-  #transport { grid-column:1; grid-row:2; display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px;
+  #transport { grid-column:1; grid-row:1; display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px;
                background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
   #playhead { position:absolute; width:0; border-left:1.5px solid #ffd54a; box-shadow:0 0 6px #ffd54a88;
               pointer-events:none; display:none; z-index:4; }
@@ -43,7 +43,11 @@
   .badge { display:inline-block; min-width:54px; padding:1px 5px; border-radius:3px; font-weight:600; }
   .up { color:var(--good); background:#3ecf8e1c; } .down { color:var(--bad); background:#ff6b6b1c; }
   .warn { color:var(--accent); }
-  #cursor td { padding:2px 0; }
+  /* cursor readout: follows the mouse over the spectrogram panels */
+  #tip { position:absolute; z-index:5; display:none; pointer-events:none; min-width:150px;
+         background:rgba(20,22,27,0.94); border:1px solid #4a5160; border-radius:5px; padding:5px 9px;
+         box-shadow:0 2px 10px #0008; font-size:12px; }
+  #tip td { padding:1px 0; } #tip td:last-child { padding-left:14px; }
   #err { color:var(--bad); padding:8px; display:none; white-space:pre-wrap; }
   [title] { cursor:help; }
 </style>
@@ -51,7 +55,7 @@
 <body>
 <div id="err"></div>
 <div id="app">
-  <div id="main"><div id="fig"></div><div id="playhead"></div></div>
+  <div id="main"><div id="fig"></div><div id="playhead"></div><div id="tip"></div></div>
 
   <div id="transport">
     <span id="clock">00:00:00.000</span>
@@ -72,15 +76,6 @@
   </div>
 
   <div id="panel">
-    <div class="card">
-      <h4>CURSOR</h4>
-      <table id="cursor">
-        <tr><td>Time</td><td id="c_t">—</td></tr>
-        <tr><td>Frequency</td><td id="c_f">—</td></tr>
-        <tr><td>Level</td><td id="c_db">—</td></tr>
-        <tr><td>Track</td><td id="c_tr">—</td></tr>
-      </table>
-    </div>
     <div class="card"><h4>QUALITY <span class="small" style="letter-spacing:0">vs clean</span></h4><div id="quality"></div></div>
     <div class="card"><h4>LEVELS</h4><div id="levels"></div></div>
     <div class="card" id="slicecard" style="display:none"><h4>SPECTRUM AT PLAYHEAD</h4><div id="slice"></div></div>
@@ -123,7 +118,7 @@
       for (let i = 0; i < r; i++) rows[i] = f.subarray(i * c, (i + 1) * c);
       tr.z = rows;
       if (tr.meta && tr.meta.kind === "spec") {
-        // Readout goes to the Cursor card instead of a floating tooltip.
+        // Readout goes to our own tooltip (#tip), styled like the rest of the player.
         tr.hoverinfo = "none"; delete tr.hovertemplate; specs.push({ tr, rows, x: tr.x }); }
     }
   }
@@ -136,7 +131,7 @@
   // ---- Right panel: quality scorecard + level stats --------------------------------------
   function renderQuality() {
     const q = DATA.scorecard;
-    if (!q) { $("quality").innerHTML = '<span class="muted">Assign each role once (Tracks menu) to score.</span>'; return; }
+    if (!q) { $("quality").innerHTML = '<span class="muted">No scores for this file.</span>'; return; }
     let h = '<table><tr><th></th><th>Noisy</th><th>Processed</th><th>Change</th></tr>';
     for (const r of q) {
       const cls = r.delta === null ? "" : (r.delta >= 0 ? "up" : "down");
@@ -174,18 +169,32 @@
   renderQuality(); renderLevels();
   $("fmt").textContent = DATA.format_line;
 
-  // ---- Cursor readout (hover) -------------------------------------------------------------
+  // ---- Cursor readout: a tooltip next to the mouse ------------------------------------------
+  const tip = $("tip"), mainDiv = $("main");
+  function moveTip(e) {  // beside the pointer, flipped left/up near the right/bottom edge
+    const r = mainDiv.getBoundingClientRect();
+    let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
+    if (x + tip.offsetWidth > r.width) x -= tip.offsetWidth + 28;
+    if (y + tip.offsetHeight > r.height) y -= tip.offsetHeight + 28;
+    tip.style.left = Math.max(x, 0) + "px"; tip.style.top = Math.max(y, 0) + "px";
+  }
   gd.on("plotly_hover", (ev) => {
     const p = ev.points && ev.points.find((q) => q.data.meta && q.data.meta.kind === "spec");
     if (!p) return;
     const row = Array.isArray(p.pointNumber) ? p.pointNumber[0] : p.pointIndex[0];
     const hz = p.data.meta.freqs_hz ? p.data.meta.freqs_hz[row] : +p.y;
-    $("c_t").textContent = (+p.x).toFixed(3) + " s";
-    $("c_f").textContent = fmtHz(hz);
-    $("c_db").textContent = fmtNum(+p.z, 1, " dB");
-    $("c_tr").innerHTML = `<span style="color:${p.data.meta.color}">${p.data.meta.role}</span>`;
+    tip.innerHTML = "<table>"
+      + `<tr><td>Time</td><td>${(+p.x).toFixed(3)} s</td></tr>`
+      + `<tr><td>Frequency</td><td>${fmtHz(hz)}</td></tr>`
+      + `<tr><td>Level</td><td>${fmtNum(+p.z, 1, " dB")}</td></tr>`
+      + `<tr><td>Track</td><td style="color:${p.data.meta.color}">${p.data.meta.role}</td></tr></table>`;
+    tip.style.display = "block";
+    if (ev.event) moveTip(ev.event);
     if (!playing && DATA.show_slice) drawSlice(+p.x);
   });
+  gd.on("plotly_unhover", () => { tip.style.display = "none"; });
+  gd.addEventListener("mousemove", (e) => { if (tip.style.display === "block") moveTip(e); });
+  gd.addEventListener("mouseleave", () => { tip.style.display = "none"; });
 
   // ---- Optional spectrum-at-playhead card --------------------------------------------------
   const sliceDiv = $("slice");

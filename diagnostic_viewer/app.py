@@ -14,16 +14,15 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from viewer import dsp, export, figures, metrics
+from viewer import dsp, figures, metrics
 from viewer.audio_io import Audio, TripletError, load_wav, to_wav_bytes, validate_strict
 from viewer.dataset import DEFAULT_FOLDER_ALIASES, DEFAULT_SUFFIX_ALIASES, ROLES, discover, list_wavs
 from viewer.player import player
 from viewer.systems import SYSTEMS, group_runs, split_key
 
 DATA_DIR = os.environ.get("VIEWER_DATA_DIR", "data")
-EXPORT_DIR = Path(os.environ.get("VIEWER_EXPORT_DIR", "exports"))
 MANUAL = "__manual__"
-TARGET_LUFS = -16.0
+TARGET_LUFS = -20.0
 SYSTEM_COLORS = {"Neural network": "#a495ff", "Wiener baseline": "#4fd1a5", "Ridge baseline": "#f39c12",
                  "Other": "#8a919e"}
 
@@ -33,18 +32,16 @@ st.markdown("""<style>
 .block-container{padding-top:2.6rem;padding-bottom:1rem;padding-left:2rem;padding-right:2rem;max-width:100%}
 h3{margin:0!important;padding:0!important}
 /* header: labels on buttons, popovers and toggles never break mid-word */
-.stButton button p,[data-testid="stPopover"] button p,[data-testid="stPopoverButton"] p,
-.stCheckbox label p{white-space:nowrap}
-.stButton button,[data-testid="stPopover"] button{padding-left:.6rem;padding-right:.6rem}
-/* header rows: selection on the left, tools on the right; fixed-size controls keep their natural width
-   and the rows wrap whole controls (never their labels) when the window is narrow */
+.stButton button p,.stCheckbox label p{white-space:nowrap}
+.stButton button{padding-left:.6rem;padding-right:.6rem}
+/* header rows: fixed-size controls keep their natural width and the rows wrap whole controls
+   (never their labels) when the window is narrow */
 @media (min-width:641px){
-[data-testid="stHorizontalBlock"]:has(.stPopover){flex-wrap:wrap;row-gap:.5rem}
-[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]{flex:0 0 auto!important;width:auto!important}
-[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(1){flex:1 1 0!important;min-width:180px;max-width:280px}
-[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(2){flex:1.3 1 0!important;min-width:200px;max-width:360px}
-[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(3){padding-left:.5rem;min-height:2.5rem;display:flex;justify-content:center}
-[data-testid="stHorizontalBlock"]:has(.stPopover)>[data-testid="stColumn"]:nth-child(4){margin-left:auto}
+.st-key-hdr [data-testid="stHorizontalBlock"]{flex-wrap:wrap;row-gap:.5rem}
+.st-key-hdr [data-testid="stColumn"]{flex:0 0 auto!important;width:auto!important}
+.st-key-hdr [data-testid="stColumn"]:nth-child(1){flex:1 1 0!important;min-width:180px;max-width:280px}
+.st-key-hdr [data-testid="stColumn"]:nth-child(2){flex:1.3 1 0!important;min-width:200px;max-width:360px}
+.st-key-hdr [data-testid="stColumn"]:nth-child(3){padding-left:.5rem;min-height:2.5rem;display:flex;justify-content:center}
 [data-testid="stHorizontalBlock"]:has(.np){flex-wrap:wrap;row-gap:.5rem}
 [data-testid="stHorizontalBlock"]:has(.np)>[data-testid="stColumn"]{flex:0 0 3rem!important;width:3rem!important;min-width:0;max-width:3rem}
 [data-testid="stHorizontalBlock"]:has(.np)>[data-testid="stColumn"]:nth-child(1){flex:2 1 0!important;width:auto!important;min-width:260px;max-width:none}
@@ -226,7 +223,7 @@ def run_name(path: str) -> str:
     return r.name if len(same) == 1 else r.label
 
 
-s_sys, s_run, s_lufs, s_tracks, s_disp = st.columns([1.8, 2.4, 1.9, 1, 1.15], vertical_alignment="bottom")
+s_sys, s_run, s_lufs = st.container(key="hdr").columns([1.8, 2.4, 1.9], vertical_alignment="bottom")
 if runs_by_path:
     s_sys.selectbox("System", list(systems), key="system", on_change=on_system_change,
                     help="Which processing system's output you are looking at and hearing.")
@@ -241,8 +238,6 @@ match_lufs = s_lufs.toggle("Match loudness", key="match_lufs",
                            help=f"Play and draw every track at the same integrated loudness ({TARGET_LUFS:g} LUFS, "
                                 "ITU-R BS.1770), so quieter processing can be judged on sound quality alone. "
                                 "Quality scores are always computed from the original files.")
-tracks_pop = s_tracks.popover("Tracks", use_container_width=True)
-display_pop = s_disp.popover("⚙ Display", use_container_width=True)
 
 if runs_by_path and not run:
     st.info(f"**{ss.sel_system}: no outputs found yet** under `{root}`.  \n"
@@ -306,57 +301,17 @@ sr = audios["clean"].sr
 n_ch = audios["clean"].n_channels
 duration = audios["clean"].duration
 
-# ---------------------------------------------------------------------------- display popover
-with display_pop:
-    channel = st.selectbox("Channel", range(n_ch), format_func=lambda c: f"ch {c + 1}") if n_ch > 1 else 0
-    scale = st.radio("Frequency scale", dsp.SCALES, index=1, horizontal=True, key="scale",
-                     help="log and mel give low frequencies (where speech lives) more room.")
-    nfft_opts = [256, 512, 1024, 2048, 4096]
-    default_nfft = min(nfft_opts, key=lambda n: abs(n - sr * 0.064))  # ≈64 ms
-    n_fft = st.select_slider("Detail: sharper in time ↔ sharper in pitch", nfft_opts, value=default_nfft,
-                             format_func=lambda n: f"{1000 * n / sr:.0f} ms")
-    db_range = st.slider("Contrast (dB shown dark → bright)", -160, 20, (-110, -20), 5)
-    colormap = st.selectbox("Colours", list(figures.SPEC_COLORMAPS))
-    wave_opacity = st.slider("Waveform overlay", 0.0, 1.0, 0.55, 0.05)
-    shared_amp = st.checkbox("Same waveform scale on all tracks", True)
-    show_slice = st.toggle("Show spectrum at playhead", False)
-    st.divider()
-    st.caption("Advanced")
-    hop_div = st.select_slider("Hop (fraction of window)", [2, 4, 8, 16], value=4, format_func=lambda d: f"1/{d}")
-    window = st.selectbox("Window", dsp.WINDOWS)
-    n_mels = st.slider("Mel bands", 32, 256, 128, 16) if scale == "mel" else 128
-
-params = dsp.StftParams(n_fft=n_fft, hop=n_fft // hop_div, window=window, scale=scale, n_mels=n_mels)
+# ---------------------------------------------------------------------------- display settings (fixed)
+channel = 0  # the project's audio is mono
+scale = "log"  # gives low frequencies, where speech lives, more room
+n_fft = min((256, 512, 1024, 2048, 4096), key=lambda n: abs(n - sr * 0.064))  # ≈64 ms window
+window = "hann"
+db_range = (-110, -20)  # dB shown dark → bright
+params = dsp.StftParams(n_fft=n_fft, hop=n_fft // 4, window=window, scale=scale)
 ptuple = dataclasses.astuple(params)
 
-# ---------------------------------------------------------------------------- tracks popover
-order_key, entry_roles = f"order_{tri_key}", {}
-ss.setdefault(order_key, list(ROLES))
-
-
-def move(pos: int, delta: int):
-    o = ss[order_key]
-    o[pos], o[pos + delta] = o[pos + delta], o[pos]
-
-
-with tracks_pop:
-    st.caption("Display order, top to bottom. Roles decide what is scored against what.")
-    for pos, entry in enumerate(ss[order_key]):
-        c = st.columns([0.9, 0.9, 2.2, 4], vertical_alignment="center")
-        c[0].button("↑", key=f"up_{tri_key}_{entry}", on_click=move, args=(pos, -1), disabled=pos == 0)
-        c[1].button("↓", key=f"dn_{tri_key}_{entry}", on_click=move, args=(pos, 1),
-                    disabled=pos == len(ROLES) - 1)
-        entry_roles[entry] = c[2].selectbox("role", ROLES, index=ROLES.index(entry),
-                                            key=f"role_{tri_key}_{entry}", label_visibility="collapsed")
-        c[3].caption(rel(audios[entry].path))
-
-roles_valid = sorted(entry_roles.values()) == sorted(ROLES)
-if not roles_valid:
-    st.warning("Each role must be used exactly once (Tracks menu). Quality scores are hidden until then.")
-by_role = {role: entry for entry, role in entry_roles.items()} if roles_valid else {}
-
 # ---------------------------------------------------------------------------- main view
-order = ss[order_key]
+order = list(ROLES)  # display order, top to bottom
 
 # Loudness matching: one gain per track, applied to what is drawn and played (never to the scores).
 loud = {e: cached_loudness(str(audios[e].path), mtime(audios[e].path), channel) for e in ROLES}
@@ -368,7 +323,7 @@ if match_lufs:
             f"all tracks at **{achieved:.1f} LUFS** (lowered {TARGET_LUFS - achieved:.1f} dB from {TARGET_LUFS:g} "
             "so no track's peak exceeds −1 dBFS)")
     st.caption(f"🔊 Loudness matched: {note}. Gain: "
-               + " · ".join(f"{entry_roles[e]} {gain_db[e]:+.1f} dB" for e in order)
+               + " · ".join(f"{e} {gain_db[e]:+.1f} dB" for e in order)
                + ". Quality scores use the original files.")
 sig = {e: audios[e].channel(channel) * 10 ** (gain_db[e] / 20) for e in ROLES}
 
@@ -384,8 +339,8 @@ with st.spinner("Drawing spectrograms…"):
         a = audios[entry]
         spec = cached_spec(str(a.path), mtime(a.path), channel, ptuple)
         specs[entry] = dataclasses.replace(spec, db=spec.db + np.float32(gain_db[entry]))
-        tracks.append(figures.TrackView(pos, entry_roles[entry], display_name(entry), sig[entry], sr, specs[entry]))
-    fig = figures.stacked_figure(tracks, db_range, colormap, wave_opacity, shared_amp)
+        tracks.append(figures.TrackView(pos, entry, display_name(entry), sig[entry], sr, specs[entry]))
+    fig = figures.stacked_figure(tracks, db_range)
 
 
 def level_stats(entry: str) -> dict:
@@ -398,10 +353,8 @@ def level_stats(entry: str) -> dict:
     return s
 
 
-metrics_df = None
-if roles_valid:
-    paths = tuple(str(audios[by_role[r]].path) for r in ROLES)
-    metrics_df = cached_metrics(paths, tuple(mtime(Path(p)) for p in paths), channel)
+paths = tuple(str(audios[r].path) for r in ROLES)
+metrics_df = cached_metrics(paths, tuple(mtime(Path(p)) for p in paths), channel)
 
 bits = {"PCM_16": "16-bit", "PCM_24": "24-bit", "PCM_32": "32-bit", "FLOAT": "32-bit float",
         "DOUBLE": "64-bit float"}.get(audios["clean"].subtype, audios["clean"].subtype)
@@ -413,109 +366,30 @@ player(
      for t, e in zip(tracks, order)],
     duration, scale, db_range, {t.slot: t.spec.freqs for t in tracks},
     stats=[level_stats(e) for e in order],
-    scorecard=metrics.scorecard(metrics_df) if metrics_df is not None else None,
+    scorecard=metrics.scorecard(metrics_df),
     format_line=f"{system_name} · {run.label if run and tri else 'manual'} · {sr / 1000:g} kHz · {bits} · "
                 f"{chans} · {duration:.3f} s" + (f" · matched to {TARGET_LUFS:g} LUFS" if match_lufs else ""),
-    show_slice=show_slice,
 )
 
 # ---------------------------------------------------------------------------- analysis drawer
-with st.expander("Analysis & export", expanded=False):
-    tab_d, tab_l, tab_e, tab_m, tab_x = st.tabs(
-        ["Differences", "Long-term spectrum", "Loudness over time", "All metrics", "Export"])
-
-    with tab_d:
-        if roles_valid:
-            diff_range = st.slider("Colour range (± dB)", 6, 60, 20, 2)
-            sp, sc, sn = (specs[by_role[r]] for r in ("processed", "clean", "noisy"))
-            diffs = [figures.DiffView("processed − clean", dsp.difference_db(sp, sc, db_range[0]), sp),
-                     figures.DiffView("processed − noisy", dsp.difference_db(sp, sn, db_range[0]), sp)]
-            st.plotly_chart(figures.difference_figure(diffs, sr, diff_range), use_container_width=True,
-                            theme=None)
-            st.caption("Red = more energy than the reference (residual noise, artefacts). "
-                       "Blue = less (in *processed − clean*: speech that was removed).")
-        else:
-            st.info("Assign each role once to compare tracks.")
+with st.expander("Analysis", expanded=False):
+    tab_l, tab_e, tab_m = st.tabs(["Long-term spectrum", "Loudness over time", "All metrics"])
 
     with tab_l:
-        lt = {entry_roles[e]: dsp.ltas(sig[e], sr, n_fft=max(2048, n_fft), window=window)
-              for e in order}
+        lt = {e: dsp.ltas(sig[e], sr, n_fft=max(2048, n_fft), window=window) for e in order}
         st.plotly_chart(figures.ltas_figure(lt, log_freq=scale != "linear"), use_container_width=True,
                         theme=None)
         st.caption("Average spectrum over the whole file.")
 
     with tab_e:
-        env = {entry_roles[e]: dsp.rms_envelope(sig[e], sr) for e in order}
+        env = {e: dsp.rms_envelope(sig[e], sr) for e in order}
         st.plotly_chart(figures.envelope_figure(env), use_container_width=True, theme=None)
         st.caption("Loudness in 20 ms steps. Look for pumping or gating in the pauses.")
 
     with tab_m:
-        if metrics_df is not None:
-            st.dataframe(
-                metrics_df.style.format({c: "{:.3f}" for c in ("noisy", "processed", "Δ (processed − noisy)")},
-                                        na_rep="N/A"),
-                hide_index=True, use_container_width=True)
-            st.caption("Scored against the clean file. "
-                       + " · ".join(f"**{k}**: {v}" for k, v in metrics.METRIC_INFO.items()))
-        else:
-            st.info("Assign each role once to compute metrics.")
-
-    with tab_x:
-        st.markdown("**Figure**")
-        c1, c2, c3, c4 = st.columns([1, 1, 1, 2], vertical_alignment="bottom")
-        fmt = c1.radio("Format", ["png", "svg"], horizontal=True)
-        width = c2.number_input("Width (px)", 800, 6000, 1800, 100)
-        img_scale = c3.number_input("PNG scale", 1.0, 4.0, 2.0, 0.5, disabled=fmt == "svg")
-        base = f"{tri_key.replace('/', '_')}_{export.timestamp()}"
-        if c4.button("Render figure", use_container_width=True):
-            with st.spinner("Rendering…"):
-                # No 🎧 chip in exports (emoji fonts aren't available to the renderer).
-                exp_fig = figures.stacked_figure(tracks, db_range, colormap, wave_opacity, shared_amp,
-                                                 monitored_slot=0)
-                ss["fig_export"] = (f"{base}.{fmt}", export.figure_image(exp_fig, fmt, int(width), img_scale))
-                saved = export.save(ss["fig_export"][1], EXPORT_DIR, ss["fig_export"][0])
-                if saved:
-                    st.success(f"Saved to exports/{saved.name}")
-        if "fig_export" in ss:
-            name, data = ss["fig_export"]
-            st.download_button(f"Download {name}", data, file_name=name,
-                               mime="image/png" if name.endswith("png") else "image/svg+xml")
-
-        st.divider()
-        st.markdown("**Metrics CSV: this triplet**")
-        if metrics_df is not None:
-            out = metrics_df.copy()
-            out.insert(0, "stem", tri_key)
-            for r in ROLES:
-                out[f"{r}_file"] = rel(audios[by_role[r]].path)
-            out["sample_rate_hz"], out["channel"] = sr, channel + 1
-            st.download_button("Download metrics CSV", out.to_csv(index=False), file_name=f"metrics_{base}.csv",
-                               mime="text/csv")
-        else:
-            st.caption("Unavailable until each role is assigned exactly once.")
-
-        st.divider()
-        batch = [triplets[i] for i in run.triplets] if run else triplets
-        n_batch_ok = sum(t.resolved for t in batch)
-        st.markdown(f"**Batch metrics: all {len(batch)} files in "
-                    f"{system_name + ' · ' + run.label if run else '`' + root + '`'}**")
-        st.caption("Uses the discovered roles (not the Tracks menu). Incomplete or mismatched triplets are "
-                   "listed with a status instead of scores.")
-        if st.button(f"Run batch ({n_batch_ok} complete triplets)", disabled=n_batch_ok == 0):
-            bar = st.progress(0.0, text="Starting…")
-            df = export.batch_metrics(batch, root_path, channel,
-                                      progress=lambda i, n, s: bar.progress(i / max(n, 1), text=f"{i}/{n} {s}"))
-            name = f"metrics_batch_{export.timestamp()}.csv"
-            ss["batch"] = (name, df)
-            saved = export.save(df.to_csv(index=False), EXPORT_DIR, name)
-            if saved:
-                st.success(f"Saved to exports/{saved.name}")
-        if "batch" in ss:
-            name, df = ss["batch"]
-            st.dataframe(df, hide_index=True, use_container_width=True)
-            ok = df[df["status"] == "ok"] if "status" in df else df
-            num = ok.select_dtypes("number")
-            if not num.empty:
-                st.markdown("Mean over OK triplets")
-                st.dataframe(num.mean().to_frame("mean").T, use_container_width=True, hide_index=True)
-            st.download_button(f"Download {name}", df.to_csv(index=False), file_name=name, mime="text/csv")
+        st.dataframe(
+            metrics_df.style.format({c: "{:.3f}" for c in ("noisy", "processed", "Δ (processed − noisy)")},
+                                    na_rep="N/A"),
+            hide_index=True, use_container_width=True)
+        st.caption("Scored against the clean file. "
+                   + " · ".join(f"**{k}**: {v}" for k, v in metrics.METRIC_INFO.items()))

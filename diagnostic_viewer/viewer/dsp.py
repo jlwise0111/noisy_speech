@@ -195,7 +195,7 @@ def integrated_loudness(x: np.ndarray, sr: int) -> float:
     return float(lufs(z.mean()))
 
 
-def loudness_match_gains(loudness: list[float], peaks: list[float], target_lufs: float = -16.0,
+def loudness_match_gains(loudness: list[float], peaks: list[float], target_lufs: float = -20.0,
                          ceiling_dbfs: float = -1.0) -> tuple[list[float], float]:
     """Gains (dB) that bring every track to the same loudness, ideally `target_lufs`.
 
