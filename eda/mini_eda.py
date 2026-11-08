@@ -1,3 +1,8 @@
+"""Quick look at one clean/noisy pair: waveforms, spectrograms and silence buffers.
+
+A first sketch, kept for reference. Its STFT hop (256) is coarser than the training grid (128);
+simple_eda.py uses the training settings and is the one the report numbers come from.
+"""
 import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np

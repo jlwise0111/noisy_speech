@@ -23,6 +23,7 @@ def list_pairs(root, clean_dir: str, noisy_dir: str) -> list[tuple[str, Path, Pa
         raise FileNotFoundError(f"Missing {clean_root} or {noisy_root}")
 
     def stems(d):
+        """{stem: path} for the wavs in d, skipping macOS ._ files."""
         return {p.stem: p for p in d.glob("*.wav") if not p.name.startswith("._")}
 
     clean, noisy = stems(clean_root), stems(noisy_root)
@@ -39,10 +40,12 @@ def train_pairs(root, train_set: str) -> list[tuple[str, Path, Path]]:
 
 
 def test_pairs(root) -> list[tuple[str, Path, Path]]:
+    """The 824 test pairs (speakers p232, p257)."""
     return list_pairs(root, *TEST_SET)
 
 
 def speaker(stem: str) -> str:
+    """Speaker id from a stem: "p232_001" -> "p232"."""
     return stem.split("_")[0]
 
 

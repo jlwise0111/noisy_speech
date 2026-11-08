@@ -31,6 +31,7 @@ class DoubleConv(nn.Sequential):
 
 
 class UNet(nn.Module):
+    """2D U-Net on the noisy log-magnitude spectrogram, predicting a [0, 1] mask per bin."""
     def __init__(self, n_bins: int = 257, base_channels: int = 16):
         super().__init__()
         self.n_bins = n_bins
@@ -49,6 +50,7 @@ class UNet(nn.Module):
         self.head = nn.Conv2d(ch[0], 1, 1)
 
     def set_normalization(self, mean, std) -> None:
+        """Store the training-set per-bin mean/std; saved in the checkpoint with the weights."""
         self.in_mean.copy_(torch.as_tensor(mean, dtype=torch.float32))
         self.in_std.copy_(torch.as_tensor(std, dtype=torch.float32).clamp_min(1e-3))
 
@@ -72,4 +74,5 @@ class UNet(nn.Module):
 
 
 def n_parameters(model: nn.Module) -> int:
+    """Number of trainable parameters."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)

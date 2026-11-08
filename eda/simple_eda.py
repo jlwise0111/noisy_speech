@@ -15,14 +15,15 @@ Sections
   7. Noisy phase      energy-weighted phase error, and oracle reconstructions
                       (clean mag + noisy phase, clipped-mask * noisy) = ceilings for
                       any magnitude-only mask model
-  8. Silence          silent-frame fraction at 30/40/50 dB below peak, on the STFT grid
+  8. Silence          silent-frame fraction at 20/30/40 dB below peak, on the STFT grid
                       (the same grid a loss weight would use)
   9. Speakers         per-speaker table (for choosing validation speakers) and
                       train-subset speaker overlap (28spk vs 56spk leakage check)
  10. Examples         clean / noisy / noise / mask spectrograms at low, median, high SNR
  11. (optional)       PESQ-WB / STOI of noisy-vs-clean and of the oracles (--metrics)
 
-Audio is resampled to 16 kHz with the same STFT as mini_eda.py (n_fft=512, hop=256).
+Audio is resampled to 16 kHz with the same STFT and 30 dB silence threshold as the U-Net training
+(n_fft=512, hop=128; unet_model/unet/targets.py), so these figures describe what the model sees.
 The noise signal is noisy - clean, which is only valid if the pair is sample-aligned and
 equally scaled, so section 2 checks that explicitly.
 
@@ -53,11 +54,11 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_ROOT = HERE.parent / "valentini_eda"   # repo root, wherever the script is run from
 
 SR = 16000
-N_FFT, HOP = 512, 256                   # same STFT as mini_eda.py
+N_FFT, HOP = 512, 128                   # same STFT as speechprep / the U-Net
 FRAME, FRAME_HOP = 320, 160             # 20 ms frames, 10 ms hop (used for SNR measures only)
 EPS = 1e-10
-SILENCE_THRESHOLDS_DB = (30, 40, 50)    # "silent" = frame energy this far below the utterance peak
-MAIN_SILENCE_DB = 40                    # threshold used for the speech/silent mask histograms
+SILENCE_THRESHOLDS_DB = (20, 30, 40)    # "silent" = frame energy this far below the utterance peak
+MAIN_SILENCE_DB = 30                    # threshold for the speech/silent histograms (= SILENCE_DB in training)
 MAX_LAG_S = 0.02                        # alignment search window (+/- 20 ms)
 IRM_BINS = np.linspace(0.0, 1.0, 41)
 FREQS = librosa.fft_frequencies(sr=SR, n_fft=N_FFT)
@@ -68,10 +69,12 @@ SNR_BIN_LABELS = ["<=2.5", "2.5-7.5", "7.5-12.5", ">12.5"]
 
 
 def db(power):
+    """Power to dB, floored at EPS."""
     return 10.0 * np.log10(np.maximum(power, EPS))
 
 
 def frame_power(x):
+    """Mean power per 20 ms frame (10 ms hop), zero-padding clips shorter than one frame."""
     if len(x) < FRAME:
         x = np.pad(x, (0, FRAME - len(x)))
     return np.mean(np.lib.stride_tricks.sliding_window_view(x, FRAME)[::FRAME_HOP] ** 2, axis=1)
@@ -103,6 +106,7 @@ def discover_pairs(root):
 
 
 def sample_pairs(pairs, per_subset, seed=0):
+    """Up to `per_subset` random pairs from each subset (all pairs if per_subset <= 0)."""
     if per_subset <= 0:
         return pairs
     rng = random.Random(seed)
@@ -168,6 +172,7 @@ def objective(ref, deg):
 
 # --------------------------------------------------------------------------- features
 def analyze_pair(p, metrics=False):
+    """Every per-pair measure (SNR, noise character, masks, phase, silence, oracles) as one row, plus spectra for the plots."""
     c, y, r, info = load_pair(p)
     fc, fr = frame_power(c), frame_power(r)
     fc_db, fr_db = db(fc), db(fr)
@@ -242,6 +247,7 @@ def analyze_pair(p, metrics=False):
 
 # --------------------------------------------------------------------------- plots
 def finish(fig, title, path, show):
+    """Title, save and close (or show) a figure."""
     fig.suptitle(title, fontweight="bold", x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(path, dpi=130, bbox_inches="tight")
@@ -250,6 +256,7 @@ def finish(fig, title, path, show):
 
 
 def subset_hists(df, cols, title, path, show):
+    """One histogram per column, one line per subset."""
     fig, axes = plt.subplots(1, len(cols), figsize=(4.6 * len(cols), 3.6), squeeze=False)
     for ax, (col, label) in zip(axes[0], cols):
         bins = np.histogram_bin_edges(df[col].dropna(), bins=40)
@@ -262,6 +269,7 @@ def subset_hists(df, cols, title, path, show):
 
 
 def plot_noise_map(df, path, show):
+    """Noise character: spectral centroid vs flatness, coloured by stationarity."""
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.8))
     sc = axes[0].scatter(df["noise_centroid_hz"], df["noise_flatness"], c=df["noise_stationarity_db"],
                          cmap="viridis", s=10, alpha=0.8, edgecolors="none")
@@ -277,6 +285,7 @@ def plot_noise_map(df, path, show):
 
 
 def plot_spectra(df, extras, path, show):
+    """Average clean and noise spectra per subset, and the per-frequency SNR."""
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
     for s in sorted(df["subset"].unique()):
         idx = np.flatnonzero(df["subset"].to_numpy() == s)
@@ -316,6 +325,7 @@ def plot_irm(df, extras, path, show):
 
 
 def plot_phase(df, path, show):
+    """Noisy-phase quality and mask clipping vs SNR, and the oracle (clean magnitude + noisy phase) ceiling."""
     fig, axes = plt.subplots(1, 3, figsize=(18, 4.5))
     for s, g in df.groupby("subset"):
         col = SUBSET_COLORS.get(s)
@@ -336,6 +346,7 @@ def plot_phase(df, path, show):
 
 
 def plot_silence(df, path, show):
+    """Silent-frame fraction at each threshold, and its spread per utterance at the main threshold."""
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
     cols = [f"silent_frac_{t}" for t in SILENCE_THRESHOLDS_DB]
     for s, g in df.groupby("subset"):
@@ -353,6 +364,7 @@ def plot_silence(df, path, show):
 
 
 def plot_examples(df, pairs_by_id, path, show):
+    """Clean / noisy / noise / mask spectrograms for the lowest, median and highest SNR pairs."""
     s = df.sort_values("snr_db")
     picks = [("lowest SNR", s.iloc[0]), ("median SNR", s.iloc[len(s) // 2]), ("highest SNR", s.iloc[-1])]
     fig, axes = plt.subplots(len(picks), 4, figsize=(17, 3.0 * len(picks)), squeeze=False)
@@ -378,12 +390,13 @@ def plot_examples(df, pairs_by_id, path, show):
 
 # --------------------------------------------------------------------------- report
 def speaker_table(df):
+    """Per-speaker summary, for choosing validation speakers."""
     return df.groupby(["subset", "speaker"]).agg(
         utterances=("pair_id", "size"),
         minutes=("duration_s", lambda d: d.sum() / 60),
         snr_median=("snr_db", "median"),
         snr_speech_median=("snr_speech_db", "median"),
-        silent_frac_40=(f"silent_frac_{MAIN_SILENCE_DB}", "mean"),
+        silent_frac=(f"silent_frac_{MAIN_SILENCE_DB}", "mean"),
         noise_centroid_hz=("noise_centroid_hz", "median"),
         noise_stationarity_db=("noise_stationarity_db", "median"),
         phase_cos=("phase_cos", "mean"),
@@ -391,6 +404,7 @@ def speaker_table(df):
 
 
 def print_report(df, all_pairs, unmatched, metrics):
+    """Print the numbered report sections (overview, data checks, silence, clipping and phase, speakers)."""
     print("\n=== 1. Overview (sampled pairs) ===")
     overview = df.groupby("subset").agg(
         pairs=("pair_id", "size"), speakers=("speaker", "nunique"),
@@ -471,6 +485,7 @@ def print_report(df, all_pairs, unmatched, metrics):
 
 
 def main():
+    """Analyse the sampled pairs in parallel, then write the tables and figures."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-root", type=Path, default=DEFAULT_ROOT,
                     help="folder with clean_*_wav / noisy_*_wav subfolders")
