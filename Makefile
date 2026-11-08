@@ -31,6 +31,8 @@ UNET_PY := .venv/bin/python
 UNET_ARGS ?=
 METRICS_PY := .venv/bin/python
 METRIC_ARGS ?=
+FIGURES := figures
+FIGURES_PY := .venv/bin/python
 PIPELINE_ARGS ?=
 COMPOSE := cd $(VIEWER) && PORT=$(PORT) docker compose
 
@@ -39,7 +41,7 @@ already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exi
 
 .DEFAULT_GOAL := help
 .PHONY: help all check check-python check-docker check-dataset \
-        test test-linear test-wiener test-viewer test-metrics test-unet metrics-venv unet-venv evaluate train-evaluate \
+        test test-linear test-wiener test-viewer test-metrics test-unet metrics-venv unet-venv evaluate train-evaluate figures-venv figures \
         data-unet unet-smoke unet-all pipeline pipeline-smoke pipeline-all \
         data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
         data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
@@ -205,6 +207,13 @@ metrics-venv: check-python
 evaluate: metrics-venv ## Score every model run: PESQ-WB, STOI, SNR gain vs noisy (METRIC_ARGS="--force" to rescore)
 	cd $(METRICS) && $(METRICS_PY) evaluate_models.py $(METRIC_ARGS)
 	@echo "  Report: $(METRICS)/results/summary.md"
+
+figures-venv: check-python
+	@test -x "$(FIGURES)/$(FIGURES_PY)" || { echo "  creating $(FIGURES)/.venv"; \
+	  cd $(FIGURES) && $(PYTHON) -m venv .venv && $(FIGURES_PY) -m pip install -q -r requirements.txt; }
+
+figures: figures-venv ## Results figures for the slides (figures/*.png) from the scored runs; run make evaluate first
+	cd $(FIGURES) && $(FIGURES_PY) make_figures.py
 
 train-evaluate: data evaluate ## Train/run all models (skipping finished runs), then evaluate them all
 
