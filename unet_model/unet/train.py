@@ -23,6 +23,7 @@ from .model import UNet
 
 @dataclass
 class TrainConfig:
+    """Every training setting, saved to config.json and the checkpoint so a run can be reproduced."""
     epochs: int = 30
     batch_size: int = 16
     crop_frames: int = 256         # ~2.05 s at hop 128 / 16 kHz; multiple of 16
@@ -48,10 +49,12 @@ class TrainConfig:
     device: str = "auto"
 
     def to_dict(self):
+        """Plain dict, for JSON."""
         return asdict(self)
 
 
 def seed_everything(seed: int) -> None:
+    """Seed Python, NumPy and torch so crops, shuffling and initial weights repeat."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -81,6 +84,7 @@ def apply_threads(cfg: TrainConfig) -> None:
 
 
 def pick_device(name: str) -> torch.device:
+    """"auto" picks CUDA, then Apple MPS, then CPU; any other name is used as given."""
     if name == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
@@ -104,6 +108,7 @@ def _to(batch, device):
 
 
 def train_epoch(model, loader, optimizer, cfg: TrainConfig, device, scheduler=None) -> float:
+    """One pass over the training crops. Returns the mean silence-weighted loss."""
     model.train()
     total, n = 0.0, 0
     for batch in loader:
@@ -213,6 +218,7 @@ def fit(train_ds, val_ds, norm: dict, cfg: TrainConfig, run_dir: Path, resume: b
 
 
 def load_model(checkpoint, device="cpu") -> UNet:
+    """Rebuild the U-Net from a checkpoint (weights, normalization and width) in eval mode."""
     ck = torch.load(checkpoint, map_location=device)
     model = UNet(base_channels=ck["config"]["base_channels"])
     model.load_state_dict(ck["model"])

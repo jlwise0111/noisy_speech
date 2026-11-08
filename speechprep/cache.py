@@ -20,11 +20,13 @@ from .audio import SR, load_audio
 
 
 class WaveCache:
+    """16 kHz waveforms cached as .npy under `root`, filled on first load."""
     def __init__(self, root, sr: int = SR):
         self.root = Path(root) / f"sr{sr}"
         self.sr = sr
 
     def path_for(self, wav_path) -> Path:
+        """Cache file for a dataset wav: <root>/sr16000/<folder>/<stem>.npy."""
         wav_path = Path(wav_path)
         return self.root / wav_path.parent.name / f"{wav_path.stem}.npy"
 

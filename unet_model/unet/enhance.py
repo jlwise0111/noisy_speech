@@ -35,6 +35,7 @@ def write_triplet(out_dir: Path, stem: str, clean, noisy, enhanced, sr: int = SR
 
 
 def enhance_pairs(model, pairs, cache: WaveCache, out_dir: Path, device="cpu", log=print) -> int:
+    """Enhance every (stem, clean, noisy) pair and write the clean/noisy/enhanced wavs. Returns the count."""
     model.eval()
     for i, (stem, clean_path, noisy_path) in enumerate(pairs, 1):
         clean, noisy = cache.load(clean_path), cache.load(noisy_path)

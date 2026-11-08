@@ -41,6 +41,7 @@ from unet.train import apply_threads, available_cores, pick_device, resolve_para
 
 
 def parse_args(argv=None):
+    """Command-line options (see the module docstring for examples)."""
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dataset", default=os.environ.get("VALENTINI_DIR"),
                    help="Valentini root (default: $VALENTINI_DIR)")
