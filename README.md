@@ -9,7 +9,7 @@ a diagnostic viewer. The U-Net writes the same output layout, so the suite and v
 | `linear_baseline/` | Linear ML baseline: per-frequency-bin Ridge regression on 3×3 spectral patches, with an α sweep |
 | `speechprep/` | Shared 16 kHz preprocessing (resampling, STFT 512/128, speaker split, waveform cache), identical to the Ridge front end |
 | `colab/` | `train_comparison.ipynb`: trains one U-Net comparison run on a free Colab GPU, saving to Google Drive (used for the phase-sensitive mask run). Edinburgh DataShare now refuses downloads from Colab (HTTP 403); if the download cell fails, upload the dataset to Drive and point `DATA_DIR` at it |
-| `unet_model/` | 2D U-Net ratio-mask model with a silence-weighted loss (PyTorch) |
+| `unet_model/` | 2D U-Net ratio-mask model with a silence-weighted loss (PyTorch), plus a same-size BiLSTM for comparison (`--arch bilstm`) |
 | `metric_suite/` | Scores every model run: PESQ-WB, STOI and SNR gain vs the noisy input |
 | `figures/` | `make_figures.py`: results figures for the slides (improvement bars with 95% intervals, the three U-Net experiments, training curves, spectrograms) |
 | `diagnostic_viewer/` | Web app (Docker) to watch and listen to clean / noisy / processed triplets per system, loudness-matched |

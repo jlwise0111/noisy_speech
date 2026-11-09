@@ -32,6 +32,7 @@ in `../.cache/speechprep` (about 4 GB for 28spk + test, filled in parallel on ev
 | Input | noisy `log(|Y| + 1e-6)`, standardized per frequency bin with training-set mean/std (stored in the checkpoint) |
 | Target | `irm` = `clip(|C|/|Y|, 0, 1)` (default) or `psm` = `clip(|C|/|Y|·cos(Δθ), 0, 1)` |
 | Network | pad to multiples of 16 → 4 × [DoubleConv(3×3 conv, BN, ReLU ×2), MaxPool 2] → bottleneck → 4 × [ConvTranspose 2×2, concat skip, DoubleConv] → 1×1 conv → sigmoid → crop. Channels 16-32-64-128-256 (`--base-channels`), 1.94 M parameters |
+| Comparison network | `--arch bilstm`: same input, mask, loss and training; 2-layer bidirectional LSTM over frames (208 units each way, `--lstm-hidden`, `--lstm-layers`) → linear → sigmoid, 1.93 M parameters. Trains on CPU when the device is auto: PyTorch 2.2's LSTM gradients on Apple MPS are wrong |
 | VAD | frame is silent if clean frame energy < utterance peak − `--silence-db` (30 dB → 28% of 28spk frames; 40 dB → 5%) |
 | Loss | per-frame weighted MSE (or Huber, δ = 0.1): weight 1 speech, `--silence-weight` (0.25) silence, 0 padding, normalized by total weight. `--silence-weight 1` = plain MSE |
 | Training | random 256-frame crops (2.05 s), batch 16, AdamW (lr 1e-3, wd 1e-2), ReduceLROnPlateau (×0.5, patience 2) or `--scheduler cosine`, grad clip 5, early stop after 6 stale epochs, seed 0 |
