@@ -1,0 +1,2 @@
+# per-pair table from simple_eda.py (18 MB for the full run); regenerate it instead of committing it
+simple_eda_output/pairs.csv

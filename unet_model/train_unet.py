@@ -2,6 +2,7 @@
 """Train the U-Net mask model on Valentini and enhance the test set.
 
     python train_unet.py --dataset "$DS" --train-set 28spk
+    python train_unet.py --dataset "$DS" --train-set 28spk --arch bilstm --run-name bilstm_28spk
     python train_unet.py --dataset "$DS" --model outputs/<run>/best.pt --skip-train   # re-enhance only
 
 This file is the *experiment script*. It holds no ML of its own: it calls `speechprep` and `unet`
@@ -64,6 +65,8 @@ def parse_args(argv=None):
     args = p.parse_args(argv)
     if not args.dataset:
         p.error("--dataset is required (or set VALENTINI_DIR)")
+    if args.arch not in ("unet", "bilstm"):
+        p.error("--arch must be unet or bilstm")
     if args.skip_train and not args.model:
         p.error("--skip-train needs --model")
     if "train" in (args.run_name or ""):
@@ -187,7 +190,7 @@ def enhance_test(checkpoint: Path, test, cache, run_dir: Path, cfg, info: dict) 
     If you look at test scores, change something and retrain, the test set has become a
     validation set, and the final number is optimistic. Decide everything on validation first."""
 
-    device = pick_device(cfg.device)
+    device = pick_device(cfg.device, cfg.arch)
     model = load_model(checkpoint, device)
     info["checkpoint"] = portable(checkpoint)
     info["n_parameters"] = n_parameters(model)
