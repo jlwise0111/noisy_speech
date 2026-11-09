@@ -24,7 +24,7 @@ TRAIN_SETS = ("28spk", "56spk", "both")
 @dataclass(frozen=True)
 class ModelSpec:
     key: str          # unique id, e.g. "unet_28spk"
-    family: str       # ridge | wiener | unet | oracle
+    family: str       # ridge | wiener | unet | bilstm | oracle
     label: str        # short name shown on the button / panel
     description: str  # longer text shown on the panel label
     path: Path        # weights file (or params.json for Wiener)
@@ -49,6 +49,8 @@ def registry(models_root: Path | str = MODELS_ROOT) -> tuple[list[ModelSpec], li
     for t in TRAIN_SETS:
         want.append(ModelSpec(f"unet_{t}", "unet", f"U-Net {t}", f"U-Net ratio mask, trained on {t}",
                               root / "unet_model/outputs" / f"unet_{t}" / "best.pt", t))
+    want.append(ModelSpec("bilstm_28spk", "bilstm", "BiLSTM 28spk", "BiLSTM ratio mask, same size as the U-Net, trained on 28spk",
+                          root / "unet_model/outputs/bilstm_28spk/best.pt", "28spk"))
     want.append(ModelSpec("oracle", "oracle", "Oracle", "ideal Wiener mask from the clean file (ceiling)",
                           root / "wiener_baseline/outputs/oracle_test/params.json"))
     found = [m for m in want if m.path.is_file()]
@@ -81,7 +83,7 @@ def load(spec: ModelSpec) -> Enhancer:
         from wiener import wiener_oracle
         params = _wiener_params(spec.path)
         return lambda noisy, clean: wiener_oracle(noisy, clean, SR, params)
-    if spec.family == "unet":
+    if spec.family in ("unet", "bilstm"):     # load_model rebuilds whichever network the checkpoint names
         import torch
         from unet import load_model
         from unet.enhance import enhance

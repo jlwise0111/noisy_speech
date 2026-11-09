@@ -47,6 +47,12 @@ def make_models(root: Path, with_unet: bool = True) -> Path:
             torch.manual_seed(0)
             m = UNet(base_channels=4).eval()
             torch.save({"model": m.state_dict(), "config": {"base_channels": 4}}, d / "best.pt")
+        from unet import BiLSTM
+        d = root / "unet_model/outputs/bilstm_28spk"
+        d.mkdir(parents=True)
+        m = BiLSTM(hidden=8).eval()
+        torch.save({"model": m.state_dict(), "config": {"arch": "bilstm", "lstm_hidden": 8, "lstm_layers": 2}},
+                   d / "best.pt")
     return root
 
 

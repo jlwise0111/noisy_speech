@@ -24,6 +24,7 @@ Without it, the player still works with uploads.
   - Ridge 28spk / 56spk / both.
   - Wiener min-stats and Wiener leading.
   - U-Net 28spk / 56spk / both.
+  - BiLSTM 28spk: the same-size recurrent comparison model.
   - Oracle: dataset files only, because it needs the clean recording.
 
   Every model is found in its run folder (`*/outputs/*`) and run with the same code that trained and

@@ -9,7 +9,7 @@ from mplayer import engine
 from fakes import make_models, speechlike
 
 EXPECTED = ["ridge_28spk", "ridge_56spk", "ridge_both", "wiener_minstats", "wiener_leading",
-            "unet_28spk", "unet_56spk", "unet_both", "oracle"]
+            "unet_28spk", "unet_56spk", "unet_both", "bilstm_28spk", "oracle"]
 
 
 @pytest.fixture(scope="module")
@@ -29,7 +29,7 @@ def test_registry_reports_missing_runs(tmp_path):
     make_models(tmp_path, with_unet=False)
     specs, missing = engine.registry(tmp_path)
     assert "unet_28spk" not in [s.key for s in specs]
-    assert len(missing) == 3 and all(m.startswith("U-Net") for m in missing)
+    assert len(missing) == 4 and all(m.startswith(("U-Net", "BiLSTM")) for m in missing)
 
 
 @pytest.mark.parametrize("seconds", [0.5, 2.0, 3.3337])
@@ -92,6 +92,7 @@ def test_matches_pipeline_outputs():
     out, errors = engine.run_all(specs, enh, noisy, clean)
     assert errors == {}
     runs = {"unet_28spk": "unet_model/outputs/unet_28spk/enhanced",
+            "bilstm_28spk": "unet_model/outputs/bilstm_28spk/enhanced",
             "wiener_leading": "wiener_baseline/outputs/wiener_leading_test/processed",
             "oracle": "wiener_baseline/outputs/oracle_test/processed",
             "ridge_both": "linear_baseline/outputs/ridge_both/enhanced"}
