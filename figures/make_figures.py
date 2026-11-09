@@ -28,9 +28,9 @@ RUNS = ROOT / "metric_suite" / "results" / "runs"
 UNET = ROOT / "unet_model" / "outputs"
 OUT = Path(__file__).resolve().parent
 
-# Text and structure colors, plus one accent for the U-Nets (reference palette, slots 1-3).
+# Text and structure colors, plus the reference palette's categorical slots 1-4 (yellow = the BiLSTM).
 INK, MUTED, GRID = "#1f2328", "#59636e", "#d8dee4"
-BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
+BLUE, ORANGE, AQUA, YELLOW = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 BASELINE, CEILING = "#8c959f", "#c6ccd2"
 
 # (label, metric CSV, family) in display order, top to bottom.
@@ -38,6 +38,7 @@ SYSTEMS = [
     ("Ridge regression", "linear_baseline__outputs__ridge_28spk", "baseline"),
     ("Wiener, min. statistics", "wiener_baseline__outputs__wiener_minstats_test", "baseline"),
     ("Wiener, leading noise", "wiener_baseline__outputs__wiener_leading_test", "baseline"),
+    ("BiLSTM (same size as U-Net)", "unet_model__outputs__bilstm_28spk", "bilstm"),
     ("U-Net, half width", "unet_model__outputs__unet_28spk_c8", "unet"),
     ("U-Net, plain MSE", "unet_model__outputs__unet_28spk_sw1", "unet"),
     ("U-Net (main)", "unet_model__outputs__unet_28spk", "unet"),
@@ -49,6 +50,7 @@ EXPERIMENTS = [
     ("Phase-sensitive mask", "unet_model__outputs__unet_28spk_psm"),
     ("Plain MSE (silence weight 1.0)", "unet_model__outputs__unet_28spk_sw1"),
     ("Half width (¼ parameters)", "unet_model__outputs__unet_28spk_c8"),
+    ("BiLSTM, same size", "unet_model__outputs__bilstm_28spk"),
 ]
 
 
@@ -108,7 +110,7 @@ def bar_panel(ax, labels, means, cis, colors, title, fmt, zero=True):
 def improvement_figure():
     rows = {name: load(name) for _, name, _ in SYSTEMS}
     stems = sorted(set.intersection(*(set(r) for r in rows.values())))
-    colors = [{"baseline": BASELINE, "unet": BLUE, "oracle": CEILING}[fam] for _, _, fam in SYSTEMS]
+    colors = [{"baseline": BASELINE, "unet": BLUE, "bilstm": YELLOW, "oracle": CEILING}[fam] for _, _, fam in SYSTEMS]
     labels = [label for label, _, _ in SYSTEMS]
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.6), sharey=True)
     for ax, key, title, fmt in [
@@ -129,8 +131,8 @@ def experiments_figure():
     runs = [(label, load(name)) for label, name in EXPERIMENTS]
     stems = sorted(set(main).intersection(*(set(r) for _, r in runs)))
     labels = [label for label, _ in runs]
-    colors = [BLUE, ORANGE, AQUA]
-    fig, axes = plt.subplots(1, 3, figsize=(13, 3.4), sharey=True)
+    colors = [BLUE, ORANGE, AQUA, YELLOW]
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.0), sharey=True)
     for ax, key, title, fmt in [
         (axes[0], "pesq_wb_processed", "PESQ-WB", "{:+.3f}"),
         (axes[1], "stoi_processed", "STOI", "{:+.4f}"),
@@ -174,7 +176,8 @@ def training_figure():
     ax = axes[1]
     for run, label, color in [("unet_28spk", "main (silence weight 0.25)", BLUE),
                               ("unet_28spk_sw1", "plain MSE (weight 1.0)", ORANGE),
-                              ("unet_28spk_c8", "half width", AQUA)]:
+                              ("unet_28spk_c8", "half width", AQUA),
+                              ("bilstm_28spk", "BiLSTM", YELLOW)]:
         h = history(run)
         ax.plot(h["epoch"], h["val_mse"], color=color, linewidth=2, label=label)
         ax.text(h["epoch"][-1] + 0.4, h["val_mse"][-1], label.split(" (")[0], color=INK, fontsize=9,
