@@ -1,0 +1,10 @@
+# Installed in the Docker image with --extra-index-url https://download.pytorch.org/whl/cpu (CPU-only torch).
+torch==2.15.0
+numpy>=1.26,<3
+scipy==1.14.1
+soundfile==0.12.1
+streamlit==1.39.0
+plotly==5.24.1
+pandas==2.2.3
+pyarrow==17.0.0
+pytest==8.3.3

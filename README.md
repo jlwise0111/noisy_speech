@@ -13,6 +13,7 @@ a diagnostic viewer. The U-Net writes the same output layout, so the suite and v
 | `metric_suite/` | Scores every model run: PESQ-WB, STOI and SNR gain vs the noisy input |
 | `figures/` | `make_figures.py`: results figures for the slides (improvement bars with 95% intervals, the three U-Net experiments, training curves, spectrograms) |
 | `diagnostic_viewer/` | Web app (Docker) to watch and listen to clean / noisy / processed triplets per system, loudness-matched |
+| `model_player/` | Web app (Docker) that runs one file (an upload, or any train/test file) through every trained model and lets you switch between the outputs live, in lock-step, with a 2 ms crossfade |
 
 Every model writes `<folder>/outputs/<run>/{clean,noisy,enhanced|processed}/<stem>.wav`. The metric suite and
 the viewer find those runs automatically.
@@ -29,6 +30,8 @@ make train-evaluate   # run every model (finished runs are skipped), then score 
 make data-unet        # train the U-Net on 28spk and enhance the test set (hours; not part of 'all')
 make figures          # results figures (figures/*.png) from the scored runs
 make viewer           # build, start and open the viewer;  make viewer-close to shut it down
+make player           # build, start and open the model player (port 8502);  make player-down to stop it
+make test-player      # model player tests, inside its Docker image
 ```
 
 Tell make where the dataset is with `make … DATASET=/path/to/valentini_noisy_speech_database`, by setting

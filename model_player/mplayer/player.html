@@ -1,0 +1,540 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg:#14161b; --panel:#1b1e25; --card:#20242c; --line:#2c313b; --fg:#d6d9df; --muted:#8a919e;
+          --accent:#f39c12; --bad:#ff6b6b; --diff:#8fa1b3; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+               font:13px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow:hidden; }
+  #app { display:grid; grid-template-columns:minmax(0,1fr) 270px; grid-template-rows:auto auto; gap:10px; }
+  #main { grid-column:1; grid-row:2; position:relative; border-radius:6px; overflow:hidden; }
+  #panel { grid-column:2; grid-row:1 / span 2; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+  #transport { grid-column:1; grid-row:1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;
+               background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:8px 12px; }
+  #playhead { position:absolute; width:0; border-left:1.5px solid #ffd54a; box-shadow:0 0 6px #ffd54a88;
+              pointer-events:none; display:none; z-index:4; }
+  #clock { font:600 24px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color:var(--accent);
+           letter-spacing:0.5px; min-width:178px; }
+  button { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line);
+           border-radius:5px; padding:5px 10px; cursor:pointer; }
+  button:hover { border-color:#4a5160; }
+  .icon { width:34px; padding:5px 0; text-align:center; }
+  #play { width:42px; font-size:15px; }
+  #solo { display:flex; flex-wrap:wrap; gap:4px; flex-basis:100%; }
+  #solo button { padding:4px 9px 4px 7px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  #solo button .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  #solo button .k { color:var(--muted); font-size:10px; }
+  #solo button.active { background:var(--accent); color:#111; font-weight:600; border-color:var(--accent); }
+  #solo button.active .k { color:#3b2a08; }
+  /* diff mode: blue-grey instead of the solo orange */
+  #solo button.diffsel, #diff.on { background:var(--diff); color:#111; font-weight:600; border-color:var(--diff); }
+  #solo button.diffsel .k { color:#2a323b; }
+  #solo button .tag { font:700 11px ui-monospace, Menlo, monospace; }
+  #diff { font-weight:600; letter-spacing:.3px; }
+  /* fixed slot: the hint text can change without ever widening the bar */
+  #hint { display:inline-block; width:7.6em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  tr.don td { color:var(--diff); font-weight:600; }
+  .grp { display:flex; align-items:center; gap:6px; }
+  .muted { color:var(--muted); }
+  .small { font-size:11px; }
+  .spacer { flex:1 1 auto; }
+  input[type=range] { accent-color:var(--accent); width:90px; }
+  input[type=checkbox] { accent-color:var(--accent); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .card h4 { margin:0 0 8px; font-size:10.5px; letter-spacing:1.2px; color:var(--muted); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td, th { padding:3px 0 3px 8px; text-align:right; white-space:nowrap; }
+  th { font-weight:600; font-size:11px; color:var(--muted); }
+  td:first-child, th:first-child { text-align:left; padding-left:0; }
+  tr.on td { color:var(--accent); font-weight:600; }
+  #levels td:first-child { max-width:118px; overflow:hidden; text-overflow:ellipsis; }
+  #levels tr { cursor:pointer; }
+  #tip { position:absolute; z-index:5; display:none; pointer-events:none; min-width:150px;
+         background:rgba(20,22,27,0.94); border:1px solid #4a5160; border-radius:5px; padding:5px 9px;
+         box-shadow:0 2px 10px #0008; font-size:12px; }
+  #tip td { padding:1px 0; } #tip td:last-child { padding-left:14px; }
+  #err { color:var(--bad); padding:8px; display:none; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<div id="err"></div>
+<div id="app">
+  <div id="main"><div id="fig"></div><div id="playhead"></div><div id="tip"></div></div>
+
+  <div id="transport">
+    <span id="clock">00:00:00.000</span>
+    <div class="grp">
+      <button id="rewind" class="icon" title="Back to start (Home)">⏮</button>
+      <button id="play" class="icon" title="Play / pause (space)">▶</button>
+    </div>
+    <label class="grp muted small">Vol <input type="range" id="vol" min="0" max="2" step="0.01" value="1"></label>
+    <label class="grp small" id="normlab" title="Match loudness (L): the first stage of playback. Every track gets its own gain so all play at the same integrated loudness (ITU-R BS.1770), before the solo / diff stage. Off: original levels."><input type="checkbox" id="norm" checked> Match loudness</label>
+    <div class="grp">
+      <button id="diff" aria-pressed="false" title="Diff mode (D): hear the new track (+) minus the old track (Ø, polarity-inverted), i.e. exactly what differs between them. Click a track to set the new one, right-click (or ⇧+key) to set the old one. Leaving diff solos the new track.">Diff</button>
+      <span id="hint" class="muted small"></span>
+    </div>
+    <span class="spacer"></span>
+    <div class="grp">
+      <button class="icon" id="zout" title="Zoom out (−)">−</button>
+      <button id="zfit" title="Show whole file (0 on the numpad row is a track key; use this)">fit</button>
+      <button class="icon" id="zin" title="Zoom in (+)">+</button>
+      <label class="grp muted small" title="Scroll the view to keep the playhead visible"><input type="checkbox" id="follow" checked> follow</label>
+    </div>
+    <div id="solo" role="radiogroup" aria-label="Solo (only one track is audible)"></div>
+    <span id="fmt" class="muted small" style="flex-basis:100%"></span>
+  </div>
+
+  <div id="panel">
+    <div class="card"><h4>LEVELS <span class="small" style="letter-spacing:0">as heard</span></h4><div id="levels"></div></div>
+  </div>
+</div>
+<script>
+(async function () {
+  const DATA = __DATA__;
+  const $ = (id) => document.getElementById(id);
+  const err = (m) => { $("err").style.display = "block"; $("err").textContent = m; };
+
+  // Streamlit's static server sends .js as text/plain, so fetch it and run it from a Blob URL.
+  try {
+    const src = await (await fetch("__PLOTLY_SRC__", { cache: "force-cache" })).text();
+    await new Promise((ok, bad) => {
+      const s = document.createElement("script");
+      s.src = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+      s.onload = ok; s.onerror = bad; document.head.appendChild(s);
+    });
+  } catch (e) { /* reported below */ }
+  if (typeof Plotly === "undefined") { err("Plotly.js failed to load from __PLOTLY_SRC__"); return; }
+
+  const b64ToBytes = (b64) => { const s = atob(b64); const u = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
+  const fmtNum = (v, d, unit = "") => (v === null || v === undefined || Number.isNaN(v)) ? "N/A"
+    : (!Number.isFinite(v) ? "silent" : v.toFixed(d).replace("-", "−") + unit);
+  const fmtClock = (t) => { const ms = Math.round(t * 1000); const h = Math.floor(ms / 3600000);
+    const m = Math.floor(ms / 60000) % 60; const s = Math.floor(ms / 1000) % 60;
+    const p = (n, w = 2) => String(n).padStart(w, "0"); return `${p(h)}:${p(m)}:${p(s)}.${p(ms % 1000, 3)}`; };
+  const fmtHz = (f) => f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : f.toFixed(0) + " Hz";
+  const T = DATA.tracks, N = T.length, SR = DATA.sr, NS = DATA.n, dur = DATA.duration;
+
+  // ---- Figure (heatmaps arrive as base64 float32) ---------------------------------------------
+  const fig = DATA.figure;
+  for (const tr of fig.data) {
+    if (tr.z && tr.z.__f32__) {
+      const f = new Float32Array(b64ToBytes(tr.z.__f32__).buffer);
+      const [r, c] = tr.z.shape; const rows = new Array(r);
+      for (let i = 0; i < r; i++) rows[i] = f.subarray(i * c, (i + 1) * c);
+      tr.z = rows;
+      if (tr.meta && tr.meta.kind === "spec") { tr.hoverinfo = "none"; delete tr.hovertemplate; }
+    }
+  }
+
+  // ---- Match loudness (stage 1 of playback); what you see follows what you hear ----------------
+  // Tracks, spectrograms and waveforms arrive at their original level with a loudness gain per track.
+  const GAIN_DB = T.map((t) => t.gain_db), LIN = GAIN_DB.map((g) => Math.pow(10, g / 20));
+  const slotIdx = Object.fromEntries(T.map((t, i) => [t.slot, i]));
+  let normOn = true;
+  try { normOn = localStorage.getItem("modelPlayer.matchLoudness") !== "0"; } catch (_) {}
+  $("norm").checked = normOn;
+  const normTarget = () => LIN.map((a) => (normOn ? a : 1));
+  const specTr = [], waveTr = [];
+  fig.data.forEach((tr, idx) => {
+    const m = tr.meta || {};
+    if (m.kind === "spec") specTr.push({ idx, i: slotIdx[m.slot], base: tr.z });
+    else if (m.kind === "wave")
+      waveTr.push({ idx, i: slotIdx[m.slot], base: Float32Array.from(tr.y || []), axis: "yaxis" + (tr.yaxis || "y").slice(1) });
+  });
+  const peakLin = waveTr.map((w) => w.base.reduce((m, v) => Math.max(m, Math.abs(v)), 0));
+  function figNorm() {
+    const z = specTr.map((s) => {
+      const d = normOn ? GAIN_DB[s.i] : 0;
+      return d === 0 ? s.base : s.base.map((row) => row.map((v) => v + d));
+    });
+    const y = waveTr.map((w) => { const a = normOn ? LIN[w.i] : 1; return a === 1 ? w.base : w.base.map((v) => v * a); });
+    const amp = Math.max(1e-3, ...waveTr.map((w, k) => peakLin[k] * (normOn ? LIN[w.i] : 1))) * 1.05;  // shared scale
+    const ranges = {}; for (const w of waveTr) ranges[`${w.axis}.range`] = [-amp, amp];
+    return { z, y, ranges };
+  }
+  {  // initial state, before the first draw (no flash of the other level)
+    const f = figNorm();
+    specTr.forEach((s, k) => { fig.data[s.idx].z = f.z[k]; });
+    waveTr.forEach((w, k) => { fig.data[w.idx].y = f.y[k]; });
+    for (const [key, r] of Object.entries(f.ranges)) { const ax = key.split(".")[0]; fig.layout[ax] = { ...(fig.layout[ax] || {}), range: r }; }
+  }
+  function redrawNorm() {
+    const f = figNorm();
+    if (specTr.length) Plotly.restyle(gd, { z: f.z }, specTr.map((s) => s.idx));
+    if (waveTr.length) Plotly.restyle(gd, { y: f.y }, waveTr.map((w) => w.idx));
+    Plotly.relayout(gd, f.ranges);
+  }
+  const fmtLine = () => { $("fmt").textContent = DATA.format_line
+    + (normOn ? ` · loudness matched to ${fmtNum(DATA.norm_lufs, 1)} LUFS` : " · original levels"); };
+  const gd = $("fig");
+  fig.layout.autosize = true; delete fig.layout.width;
+  await Plotly.newPlot(gd, fig.data, fig.layout,
+    { responsive: true, displaylogo: false, scrollZoom: false, displayModeBar: "hover",
+      modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d", "toImage"] });
+  fmtLine();
+
+  // ---- Cursor readout ---------------------------------------------------------------------------
+  const tip = $("tip"), mainDiv = $("main");
+  function moveTip(e) {
+    const r = mainDiv.getBoundingClientRect();
+    let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
+    if (x + tip.offsetWidth > r.width) x -= tip.offsetWidth + 28;
+    if (y + tip.offsetHeight > r.height) y -= tip.offsetHeight + 28;
+    tip.style.left = Math.max(x, 0) + "px"; tip.style.top = Math.max(y, 0) + "px";
+  }
+  gd.on("plotly_hover", (ev) => {
+    const p = ev.points && ev.points.find((q) => q.data.meta && q.data.meta.kind === "spec");
+    if (!p) return;
+    const row = Array.isArray(p.pointNumber) ? p.pointNumber[0] : p.pointIndex[0];
+    const hz = p.data.meta.freqs_hz ? p.data.meta.freqs_hz[row] : +p.y;
+    tip.innerHTML = "<table>"
+      + `<tr><td>Time</td><td>${(+p.x).toFixed(3)} s</td></tr>`
+      + `<tr><td>Frequency</td><td>${fmtHz(hz)}</td></tr>`
+      + `<tr><td>Level</td><td>${fmtNum(+p.z, 1, " dB")}</td></tr>`
+      + `<tr><td>Track</td><td style="color:${p.data.meta.color}">${p.data.meta.role}</td></tr></table>`;
+    tip.style.display = "block";
+    if (ev.event) moveTip(ev.event);
+  });
+  gd.on("plotly_unhover", () => { tip.style.display = "none"; });
+  gd.addEventListener("mousemove", (e) => { if (tip.style.display === "block") moveTip(e); });
+  gd.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+
+  // ---- Audio engine: ONE worklet holds every track and reads them with ONE position ------------
+  // Lock-step by construction: there is a single read index, so tracks cannot drift.
+  // The chain per track is: loudness gain n_j (stage 1, "Match loudness"; 1 when off) → mixer gain g_j
+  // (stage 2, solo / diff), and the output is Σ g_j · n_j · track_j. Turning Match loudness on or off
+  // ramps every n_j over the same 2 ms. The mixer has a target gain per track: one-hot in solo mode (XOR solo), or −1 / +1 on the
+  // two selected tracks in diff mode (second minus polarity-inverted first; all zero until two are
+  // picked). Every change of target crossfades over round(2 ms × context rate) samples: a gain going
+  // to zero follows g0·cos(πu/2), any other moves g0 + (target − g0)·sin(πu/2). For a solo switch that
+  // is outgoing cos, incoming sin, so g_out² + g_in² = 1 (equal power). A change made during a fade
+  // starts a new fade from whatever mix is audible at that moment (no jump).
+  // If the context does not run at the tracks' rate, the shared position steps by sr/ctxRate and
+  // every track is linearly interpolated at that same position.
+  const WORKLET = `
+  class XorSolo extends AudioWorkletProcessor {
+    constructor() {
+      super();
+      this.tracks = []; this.n = 0; this.step = 1; this.pos = 0; this.playing = false;
+      this.g = []; this.g0 = []; this.t = []; this.vol = 1;
+      this.ng = []; this.ng0 = []; this.nt = [];  // stage 1: loudness gains (current, fade start, target)
+      this.fadeLen = Math.max(1, Math.round(0.002 * sampleRate)); this.fadeI = this.fadeLen; this.nI = this.fadeLen;
+      this.since = 0; this.report = Math.round(sampleRate / 30);
+      this.debug = false; this.cleanFade = false; this.maxErr = 0; this.seq = 0;
+      this.port.onmessage = (e) => this.msg(e.data);
+    }
+    jump() { for (let j = 0; j < this.g.length; j++) this.g[j] = this.t[j]; this.fadeI = this.fadeLen; }
+    msg(m) {
+      if (m.seq !== undefined) this.seq = m.seq;
+      if (m.type === "load") {
+        this.tracks = m.tracks; this.n = m.n; this.step = m.sr / sampleRate; this.debug = m.debug;
+        this.g = this.tracks.map(() => 0); this.t = this.tracks.map((_, j) => (j === m.solo ? 1 : 0)); this.jump();
+        this.nt = m.norm.slice(); this.ng = m.norm.slice(); this.nI = this.fadeLen;
+        this.port.postMessage({ type: "ready", fadeLen: this.fadeLen, sampleRate, step: this.step });
+      } else if (m.type === "play") { if (this.pos >= this.n - 1) this.pos = 0; this.playing = true; this.post(); }
+      else if (m.type === "pause") { this.playing = false; this.post(); }
+      else if (m.type === "seek") { this.pos = Math.min(Math.max(m.sample, 0), this.n - 1); this.post(); }
+      else if (m.type === "vol") { this.vol = m.v; }
+      else if (m.type === "norm") {
+        if (m.target.length !== this.ng.length) return;
+        this.nt = m.target.slice();
+        if (!this.playing) { this.ng = this.nt.slice(); this.nI = this.fadeLen; return; }
+        this.ng0 = this.ng.slice(); this.nI = 0;
+      }
+      else if (m.type === "mix") {
+        const t = m.target;
+        if (t.length !== this.g.length || t.every((v, j) => v === this.t[j])) return;
+        this.t = t.slice();
+        if (!this.playing) { this.jump(); return; }  // silent: no fade needed
+        this.g0 = this.g.slice(); this.fadeI = 0; this.maxErr = 0;
+        // A plain solo switch (one unit gain to another): the case the equal-power check applies to.
+        const one = (a) => { const nz = a.map((v, j) => [v, j]).filter(([v]) => v !== 0);
+          return nz.length === 1 && Math.abs(nz[0][0]) === 1 ? nz[0][1] : -1; };
+        const a = one(this.g0), b = one(t);
+        this.cleanFade = a >= 0 && b >= 0 && a !== b;
+      }
+    }
+    post() { this.port.postMessage({ type: "pos", sample: this.pos, playing: this.playing, t: currentTime, seq: this.seq }); }
+    advanceFade() {
+      this.fadeI++;
+      const u = this.fadeI / this.fadeLen, c = Math.cos(u * Math.PI / 2), s = Math.sin(u * Math.PI / 2);
+      for (let j = 0; j < this.g.length; j++) {
+        const tj = this.t[j];
+        this.g[j] = tj === 0 ? this.g0[j] * c : this.g0[j] + (tj - this.g0[j]) * s;
+      }
+      if (this.debug && this.cleanFade) { let p = 0; for (const v of this.g) p += v * v;
+        this.maxErr = Math.max(this.maxErr, Math.abs(p - 1)); }
+      if (this.fadeI >= this.fadeLen) {
+        this.jump();
+        if (this.debug) this.port.postMessage({ type: "fade", samples: this.fadeLen,
+          maxPowerError: this.cleanFade ? this.maxErr : null });
+      }
+    }
+    advanceNorm() {
+      this.nI++;
+      const s = Math.sin((this.nI / this.fadeLen) * Math.PI / 2);
+      for (let j = 0; j < this.ng.length; j++) this.ng[j] = this.ng0[j] + (this.nt[j] - this.ng0[j]) * s;
+      if (this.nI >= this.fadeLen) this.ng = this.nt.slice();
+    }
+    process(inputs, outputs) {
+      const out = outputs[0], o = out[0], L = o.length;
+      if (!this.playing || !this.tracks.length) { for (const ch of out) ch.fill(0); return true; }
+      const g = this.g, tr = this.tracks, last = this.n - 1;
+      for (let k = 0; k < L; k++) {
+        if (this.pos > last) {
+          this.playing = false; this.pos = this.n; o.fill(0, k);
+          this.post(); this.port.postMessage({ type: "ended" }); break;
+        }
+        if (this.nI < this.fadeLen) this.advanceNorm();
+        if (this.fadeI < this.fadeLen) this.advanceFade();
+        const i = Math.floor(this.pos), f = this.pos - i, ng = this.ng;
+        let v = 0;
+        for (let j = 0; j < tr.length; j++) {
+          if (g[j] === 0) continue;
+          const gj = g[j] * ng[j];  // stage 1 (loudness) then stage 2 (solo / diff)
+          const a = tr[j]; v += gj * (f === 0 ? a[i] : a[i] + (a[i + 1] - a[i]) * f);
+        }
+        o[k] = v * this.vol;
+        this.pos += this.step;
+      }
+      for (let c = 1; c < out.length; c++) out[c].set(o);
+      if ((this.since += L) >= this.report) { this.since = 0; this.post(); }
+      return true;
+    }
+  }
+  registerProcessor("xor-solo", XorSolo);`;
+
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx;
+  try { ctx = new AC({ sampleRate: SR, latencyHint: "interactive" }); }  // tracks' own rate: no resampling
+  catch (_) { ctx = new AC({ latencyHint: "interactive" }); }
+  if (!ctx.audioWorklet) { err("This browser has no AudioWorklet (needs a current Chrome, Firefox or Safari, over http://localhost)."); return; }
+  try { await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }))); }
+  catch (e) { err("Could not start the audio engine: " + e); return; }
+  const node = new AudioWorkletNode(ctx, "xor-solo", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+  node.connect(ctx.destination);
+
+  const pcm = T.map((t) => {
+    const i16 = new Int16Array(b64ToBytes(t.pcm).buffer); const f = new Float32Array(i16.length);
+    for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32767; return f; });
+  if (pcm.some((a) => a.length !== NS)) { err("Tracks differ in length; refusing to play out of sync."); return; }
+  let solo = Math.min(Math.max(DATA.solo | 0, 0), N - 1);
+  node.port.postMessage({ type: "load", tracks: pcm, n: NS, sr: SR, solo, norm: normTarget(), debug: DATA.debug },
+                        pcm.map((a) => a.buffer));
+
+  // Clock: the worklet reports its position (in track samples) with the audio clock time it was at.
+  let playing = false, lastSample = 0, lastCtx = 0, seq = 0;
+  const send = (m) => node.port.postMessage({ ...m, seq: ++seq });
+  const latency = () => (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
+  const now = () => {
+    const t = lastSample / SR + (playing ? Math.max(0, ctx.currentTime - lastCtx - latency()) : 0);
+    return Math.min(Math.max(t, 0), dur);
+  };
+  node.port.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === "pos") {
+      if (m.seq !== seq) return;  // a report from before our latest command: stale
+      lastSample = m.sample; lastCtx = m.t; playing = m.playing; if (!playing) updateUi(); }
+    else if (m.type === "ended") { playing = false; lastSample = NS; updateUi(); }
+    else if (m.type === "ready" && DATA.debug)
+      console.log(`[model player] context ${m.sampleRate} Hz, tracks ${SR} Hz, step ${m.step}, crossfade ${m.fadeLen} samples (${(1000 * m.fadeLen / m.sampleRate).toFixed(3)} ms)`);
+    else if (m.type === "fade")
+      console.log(`[model player] crossfade: ${m.samples} samples, max |g_out² + g_in² − 1| = ${m.maxPowerError === null ? "n/a (diff change or mid-fade switch)" : m.maxPowerError.toExponential(2)}`);
+  };
+
+  function start() {
+    ctx.resume();
+    if (lastSample >= NS - 1) seekSample(0);
+    playing = true; lastCtx = ctx.currentTime;
+    send({ type: "play" }); updateUi(); requestAnimationFrame(tick);
+  }
+  function pause() { lastSample = now() * SR; playing = false; send({ type: "pause" }); updateUi(); }
+  function seekSample(s) { lastSample = s; lastCtx = ctx.currentTime; send({ type: "seek", sample: s }); }
+  function seek(t) { seekSample(Math.round(Math.min(Math.max(t, 0), dur) * SR)); place(now()); updateUi(); }
+
+  // ---- Solo (XOR) and diff mode ------------------------------------------------------------------
+  // Solo: exactly one track audible. Diff: a two-slot tracker, always at most two tracks. "new" (+)
+  // and "old" (Ø, polarity-inverted); you hear new − old, and nothing until both slots are filled.
+  //   click / key        -> the track becomes "new" (replaces the previous new; nothing to unclick)
+  //   right-click / ⇧key -> the track becomes "old" (replaces the previous old)
+  // Picking the track that already holds the other slot swaps the two. Leaving diff solos "new".
+  const DIFF_COLOR = "#8fa1b3", SOLO_COLOR = "#f39c12";
+  let diff = false, oldT = -1, newT = -1;
+  const labelIdx = T.map((t) => (fig.layout.annotations || []).findIndex((a) => a.name === "label" + t.slot));
+  const keyName = (i) => (i < 9 ? String(i + 1) : i === 9 ? "0" : "");
+  const role = (j) => (!diff ? (j === solo ? "solo" : "") : j === oldT ? "minus" : j === newT ? "plus" : "");
+  const TAG = { solo: "🎧 ", minus: "Ø ", plus: "+ ", "": "" };
+  T.forEach((t, i) => {
+    const b = document.createElement("button");
+    b.innerHTML = `<span class="tag"></span><span class="dot" style="background:${t.color}"></span>${t.label}`
+      + (keyName(i) ? ` <span class="k">${keyName(i)}</span>` : "");
+    b.title = `${t.description}${keyName(i) ? ` (key ${keyName(i)})` : ""}. Solo: click to hear only this track. `
+      + "Diff: click = new track (+), right-click = old track (Ø, polarity-inverted).";
+    b.onclick = () => pick(i, "new");
+    b.oncontextmenu = (e) => { e.preventDefault(); pick(i, "old"); };
+    $("solo").appendChild(b);
+  });
+
+  function target() {
+    const g = new Array(N).fill(0);
+    if (!diff) g[solo] = 1;
+    else if (oldT >= 0 && newT >= 0) { g[oldT] = -1; g[newT] = 1; }
+    return g;
+  }
+  function hint(msg, title = "") { $("hint").textContent = msg; $("hint").title = title; }
+  function render() {
+    $("diff").classList.toggle("on", diff);
+    $("diff").setAttribute("aria-pressed", diff ? "true" : "false");
+    $("solo").setAttribute("aria-label", diff ? "Diff: click sets the new track, right-click the old track" : "Solo (only one track is audible)");
+    document.querySelectorAll("#solo button").forEach((b, j) => {
+      const r = role(j);
+      b.classList.toggle("active", r === "solo");
+      b.classList.toggle("diffsel", r === "minus" || r === "plus");
+      b.setAttribute("aria-pressed", r ? "true" : "false");
+      b.querySelector(".tag").textContent = r === "minus" ? "Ø" : r === "plus" ? "+" : "";
+    });
+    document.querySelectorAll("#levels tr[data-i]").forEach((row) => {
+      const r = role(+row.dataset.i);
+      row.classList.toggle("on", r === "solo"); row.classList.toggle("don", r === "minus" || r === "plus");
+    });
+    const upd = {};
+    T.forEach((t, j) => {
+      const k = labelIdx[j]; if (k < 0) return;
+      const r = role(j), bg = r === "solo" ? SOLO_COLOR : r ? DIFF_COLOR : "rgba(10,12,16,0.72)";
+      upd[`annotations[${k}].text`] = `${TAG[r]}<b>${t.label}</b> · ${t.description}`;
+      upd[`annotations[${k}].bgcolor`] = bg;
+      upd[`annotations[${k}].font.color`] = r ? "#111" : "#d6d9df";
+    });
+    Plotly.relayout(gd, upd);
+    // Short, fixed-width hint (the full text is in its tooltip), so the bar never grows.
+    if (!diff) hint("");
+    else if (oldT >= 0 && newT >= 0) hint("+ minus Ø", `Hearing ${T[newT].label} − ${T[oldT].label}`);
+    else if (newT < 0) hint("click: +", "Click a track to set the new track (+)");
+    else hint("right-click: Ø", "Right-click a track to set the old track (Ø, polarity-inverted)");
+  }
+  function applyMix() { node.port.postMessage({ type: "mix", target: target() }); render(); }
+
+  function pick(i, slot = "new") {
+    if (i < 0 || i >= N) return;
+    if (!diff) { solo = i; applyMix(); return; }
+    if (slot === "new") {
+      if (i === newT) return;
+      if (i === oldT) oldT = newT;   // swap
+      newT = i;
+    } else {
+      if (i === oldT) return;
+      if (i === newT) newT = oldT;   // swap
+      oldT = i;
+    }
+    applyMix();
+  }
+  function step(d) {
+    if (!diff) { solo = (solo + d + N) % N; applyMix(); return; }
+    let j = newT >= 0 ? newT : oldT >= 0 ? oldT : -1;  // move the new track, never onto the old one
+    do { j = (j + d + N) % N; } while (j === oldT);
+    newT = j; applyMix();
+  }
+  function toggleDiff() {
+    if (!diff) { diff = true; oldT = solo; newT = -1; }  // the soloed track starts as the old one
+    else { diff = false; solo = newT >= 0 ? newT : oldT >= 0 ? oldT : solo; oldT = newT = -1; }
+    applyMix();
+  }
+  $("diff").onclick = toggleDiff;
+  gd.on("plotly_clickannotation", (ev) => { const j = labelIdx.indexOf(ev.index); if (j >= 0) pick(j, "new"); });
+
+  // ---- Levels panel ------------------------------------------------------------------------------
+  function renderLevels() {  // as heard: the loudness gain is added when Match loudness is on
+    let h = `<table><tr><th>Track</th><th title="Integrated loudness as played (ITU-R BS.1770)">LUFS</th>`
+      + `<th title="Gain from Match loudness, the first stage of playback">Gain</th>`
+      + `<th title="Sample peak as played (dBFS)">Peak</th></tr>`;
+    DATA.levels.forEach((l, i) => {
+      const g = normOn ? GAIN_DB[i] : 0;
+      h += `<tr data-i="${i}" title="${T[i].description}"><td><span style="color:${T[i].color}">●</span> ${T[i].label}</td>`
+        + `<td>${fmtNum(l.lufs + g, 1)}</td>`
+        + `<td>${normOn ? (g >= 0 ? "+" : "") + fmtNum(g, 1) : '<span class="muted">off</span>'}</td>`
+        + `<td>${fmtNum(l.peak_dbfs + g, 1)}</td></tr>`;
+    });
+    $("levels").innerHTML = h + "</table>";
+    document.querySelectorAll("#levels tr[data-i]").forEach((r) => {
+      r.onclick = () => pick(+r.dataset.i, "new");
+      r.oncontextmenu = (e) => { e.preventDefault(); pick(+r.dataset.i, "old"); };
+    });
+  }
+  function setNorm(on) {
+    normOn = on; $("norm").checked = on;
+    try { localStorage.setItem("modelPlayer.matchLoudness", on ? "1" : "0"); } catch (_) {}
+    node.port.postMessage({ type: "norm", target: normTarget() });  // ramps over 2 ms, before solo / diff
+    redrawNorm(); renderLevels(); render(); fmtLine();
+  }
+  $("norm").onchange = (e) => { setNorm(e.target.checked); e.target.blur(); };  // keep keys working
+  renderLevels();
+  render();
+
+  // ---- Transport ---------------------------------------------------------------------------------
+  $("play").onclick = () => (playing ? pause() : start());
+  $("rewind").onclick = () => seek(0);
+  $("vol").oninput = (e) => node.port.postMessage({ type: "vol", v: +e.target.value });
+  function zoomTo(r0, r1) {
+    const w = Math.min(Math.max(r1 - r0, 0.02), dur);
+    r0 = Math.min(Math.max(r0, 0), dur - w);
+    return Plotly.relayout(gd, { "xaxis.range": [r0, r0 + w] });
+  }
+  function zoomBy(f) {
+    const [r0, r1] = gd._fullLayout.xaxis.range; const t = now();
+    const c = (t >= r0 && t <= r1) ? t : (r0 + r1) / 2; const w = (r1 - r0) * f;
+    zoomTo(c - w / 2, c + w / 2);
+  }
+  $("zin").onclick = () => zoomBy(0.5);
+  $("zout").onclick = () => zoomBy(2);
+  $("zfit").onclick = () => zoomTo(0, dur);
+  function updateUi() { $("play").textContent = playing ? "⏸" : "▶"; $("clock").textContent = fmtClock(now()); place(now()); }
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT" && e.target.type !== "checkbox") return;
+    if (e.target.type === "checkbox" && e.code === "Space") e.target.blur();  // space = play, not toggle
+    if (e.code === "Space") { e.preventDefault(); playing ? pause() : start(); }
+    else if (e.key === "Home") seek(0);
+    else if (e.key === "+" || e.key === "=") zoomBy(0.5);
+    else if (e.key === "-") zoomBy(2);
+    else if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); step(-1); }
+    else if (e.key === "d" || e.key === "D") toggleDiff();
+    else if (e.key === "l" || e.key === "L") setNorm(!normOn);
+    else if (/^Digit[0-9]$/.test(e.code)) {  // 1–9, 0: solo / new track; with ⇧ in diff: old track
+      const d = +e.code.slice(5), i = d === 0 ? 9 : d - 1;
+      if (i < N) pick(i, e.shiftKey ? "old" : "new");
+    }
+  });
+
+  // ---- Playhead overlay --------------------------------------------------------------------------
+  const ph = $("playhead");
+  function place(t) {
+    const fl = gd._fullLayout; if (!fl) return;
+    const xa = fl.xaxis; const [r0, r1] = xa.range;
+    if (t < r0 || t > r1) { ph.style.display = "none"; return; }
+    ph.style.display = "block";
+    ph.style.left = (xa._offset + xa.l2p(t)) + "px";
+    ph.style.top = fl._size.t + "px";
+    ph.style.height = fl._size.h + "px";
+  }
+  let following = false;
+  function tick() {
+    const t = now();
+    place(t);
+    $("clock").textContent = fmtClock(t);
+    if ($("follow").checked && !following) {
+      const [r0, r1] = gd._fullLayout.xaxis.range; const w = r1 - r0;
+      if (w < dur * 0.98 && (t > r1 || t < r0)) { following = true; zoomTo(t, t + w).then(() => { following = false; }); }
+    }
+    if (playing) requestAnimationFrame(tick); else updateUi();
+  }
+  gd.on("plotly_click", (ev) => { if (ev.points && ev.points.length) seek(+ev.points[0].x); });
+  gd.on("plotly_relayout", () => place(now()));
+  window.addEventListener("resize", () => place(now()));
+  updateUi();
+})();
+</script>
+</body>
+</html>

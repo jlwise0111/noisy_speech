@@ -1,0 +1,14 @@
+# The build context is the whole project folder: send only the code the image needs
+# (no .venv, outputs, caches or the dataset).
+*
+!speechprep
+!unet_model/unet
+!linear_baseline/lrb
+!wiener_baseline/wiener
+!diagnostic_viewer/viewer
+!model_player
+**/__pycache__
+**/.pytest_cache
+model_player/static
+model_player/no_dataset
+model_player/.env

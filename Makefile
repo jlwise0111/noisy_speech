@@ -35,6 +35,10 @@ FIGURES := figures
 FIGURES_PY := .venv/bin/python
 PIPELINE_ARGS ?=
 COMPOSE := cd $(VIEWER) && PORT=$(PORT) docker compose
+PLAYER  := model_player
+PLAYER_PORT ?= 8502
+PLAYER_URL  := http://localhost:$(PLAYER_PORT)
+PLAYER_COMPOSE := cd $(PLAYER) && PORT=$(PLAYER_PORT) DATASET_DIR="$(DATASET)" docker compose
 
 # $(call already_ran,<marker file>): succeeds (and says so) if the run already finished and FORCE is unset.
 already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exists (FORCE=1 to redo)"
@@ -45,7 +49,8 @@ already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exi
         data-unet unet-smoke unet-all pipeline pipeline-smoke pipeline-all \
         data data-ridge data-ridge-28spk data-ridge-56spk data-ridge-both \
         data-wiener data-wiener-leading data-wiener-minstats data-wiener-oracle data-wiener-train \
-        smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open status clean
+        smoke viewer viewer-close viewer-build viewer-up viewer-down viewer-logs viewer-open \
+        player player-build player-up player-down player-logs player-open test-player status clean
 
 help: ## Show this help
 	@echo "Targets (run from the project folder):"
@@ -243,6 +248,34 @@ viewer-logs: ## Follow the viewer logs
 
 viewer-open: ## Open the viewer in the default browser
 	open "$(URL)" 2>/dev/null || xdg-open "$(URL)"
+
+# ---------------------------------------------------------------------------- model player (Docker)
+# Any .wav (upload) or any Valentini train/test file through every trained model, outputs switchable
+# live in lock-step. Mounts the project folder (trained runs) and $(DATASET) read-only. Port 8502, so
+# it runs next to the viewer.
+player: player-up player-open ## Build, start and open the model player in your browser
+
+player-build: check-docker ## Build the model player image (CPU torch, ~1 GB the first time)
+	$(PLAYER_COMPOSE) build
+
+player-up: player-build ## Start the model player and wait until it answers
+	$(PLAYER_COMPOSE) up -d
+	@printf "  waiting for $(PLAYER_URL) "; for i in $$(seq 1 60); do \
+	  curl -sf "$(PLAYER_URL)/_stcore/health" >/dev/null && { echo "✓"; exit 0; }; printf "."; sleep 2; done; \
+	  echo " ✗ not healthy, see: make player-logs"; exit 1
+	@echo "  Model player: $(PLAYER_URL)"
+
+player-down: ## Stop the model player
+	$(PLAYER_COMPOSE) down --remove-orphans
+
+player-logs: ## Follow the model player logs
+	$(PLAYER_COMPOSE) logs -f
+
+player-open: ## Open the model player in the default browser
+	open "$(PLAYER_URL)" 2>/dev/null || xdg-open "$(PLAYER_URL)"
+
+test-player: player-build ## Model player tests, inside its Docker image (trained runs mounted)
+	$(PLAYER_COMPOSE) run --rm --no-deps player python -m pytest -q -p no:cacheprovider
 
 # ---------------------------------------------------------------------------- housekeeping
 status: ## List collected runs (files per run) and git branches
