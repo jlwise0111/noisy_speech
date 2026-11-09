@@ -38,7 +38,11 @@ COMPOSE := cd $(VIEWER) && PORT=$(PORT) docker compose
 PLAYER  := model_player
 PLAYER_PORT ?= 8502
 PLAYER_URL  := http://localhost:$(PLAYER_PORT)
-PLAYER_COMPOSE := cd $(PLAYER) && PORT=$(PLAYER_PORT) DATASET_DIR="$(DATASET)" docker compose
+# DATASET is made absolute (from the project folder) before the cd, so a relative path such as
+# valentini_eda still points at the dataset rather than at model_player/valentini_eda. Empty or
+# missing: the player mounts its empty no_dataset folder and offers uploads only.
+PLAYER_COMPOSE := DS="$(if $(strip $(DATASET)),$$(cd "$(DATASET)" 2>/dev/null && pwd))"; \
+  cd $(PLAYER) && PORT=$(PLAYER_PORT) DATASET_DIR="$$DS" docker compose
 
 # $(call already_ran,<marker file>): succeeds (and says so) if the run already finished and FORCE is unset.
 already_ran = test -z "$(FORCE)" && test -f "$(1)" && echo "  ✓ skip: $(1) exists (FORCE=1 to redo)"
@@ -259,6 +263,7 @@ player-build: check-docker ## Build the model player image (CPU torch, ~1 GB the
 	$(PLAYER_COMPOSE) build
 
 player-up: player-build ## Start the model player and wait until it answers
+	@test -d "$(DATASET)" || echo "  ⚠ no dataset at DATASET='$(DATASET)': the player will offer uploads only (set it in local.mk)"
 	$(PLAYER_COMPOSE) up -d
 	@printf "  waiting for $(PLAYER_URL) "; for i in $$(seq 1 60); do \
 	  curl -sf "$(PLAYER_URL)/_stcore/health" >/dev/null && { echo "✓"; exit 0; }; printf "."; sleep 2; done; \
