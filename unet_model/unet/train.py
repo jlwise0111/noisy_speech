@@ -18,7 +18,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from .loss import masked_mse_parts, weighted_mask_loss
-from .model import UNet
+from .model import build_model
 
 
 @dataclass
@@ -40,7 +40,10 @@ class TrainConfig:
     silence_weight: float = 0.25   # 1.0 = plain unweighted loss
     silence_db: float = 30.0       # silent = clean frame energy this far below the utterance peak
     target: str = "irm"            # "irm" or "psm"
-    base_channels: int = 16
+    arch: str = "unet"             # "unet" or "bilstm"
+    base_channels: int = 16        # U-Net width
+    lstm_hidden: int = 208         # BiLSTM units per direction (208 x 2 layers ~ the U-Net's size)
+    lstm_layers: int = 2
     workers: int = -1              # DataLoader processes for training crops (-1 = from the CPU count)
     val_workers: int = 1           # DataLoader processes for validation (whole utterances, batch 1)
     threads: int = 0               # torch intra-op threads (0 = the cores the loader workers leave free)
@@ -83,12 +86,16 @@ def apply_threads(cfg: TrainConfig) -> None:
         torch.set_num_threads(cfg.threads)
 
 
-def pick_device(name: str) -> torch.device:
-    """"auto" picks CUDA, then Apple MPS, then CPU; any other name is used as given."""
+def pick_device(name: str, arch: str = "unet") -> torch.device:
+    """"auto" picks CUDA, then Apple MPS, then CPU; any other name is used as given.
+
+    The BiLSTM skips MPS: in PyTorch 2.2 the LSTM backward pass on MPS returns wrong gradients
+    (the forward pass is fine), and training diverges. On CPU it trains normally."""
     if name == "auto":
         if torch.cuda.is_available():
             return torch.device("cuda")
-        return torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        mps = torch.backends.mps.is_available() and arch != "bilstm"
+        return torch.device("mps" if mps else "cpu")
     return torch.device(name)
 
 
@@ -154,10 +161,10 @@ def fit(train_ds, val_ds, norm: dict, cfg: TrainConfig, run_dir: Path, resume: b
     cfg = resolve_parallelism(cfg)
     apply_threads(cfg)
     seed_everything(cfg.seed)
-    device = pick_device(cfg.device)
+    device = pick_device(cfg.device, cfg.arch)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    model = UNet(base_channels=cfg.base_channels)
+    model = build_model(cfg.to_dict())
     model.set_normalization(norm["mean"], norm["std"])
     model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -217,10 +224,10 @@ def fit(train_ds, val_ds, norm: dict, cfg: TrainConfig, run_dir: Path, resume: b
     return best_path
 
 
-def load_model(checkpoint, device="cpu") -> UNet:
-    """Rebuild the U-Net from a checkpoint (weights, normalization and width) in eval mode."""
+def load_model(checkpoint, device="cpu") -> torch.nn.Module:
+    """Rebuild the network from a checkpoint (architecture, weights, normalization, size) in eval mode."""
     ck = torch.load(checkpoint, map_location=device)
-    model = UNet(base_channels=ck["config"]["base_channels"])
+    model = build_model(ck["config"])
     model.load_state_dict(ck["model"])
     return model.to(device).eval()
 

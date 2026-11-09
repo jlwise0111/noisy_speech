@@ -3,7 +3,8 @@ import pytest
 import torch
 
 from speechprep import stft
-from unet import UNet, n_parameters
+from unet import BiLSTM, UNet, build_model, n_parameters
+from unet.train import TrainConfig
 from unet.loss import masked_mse_parts, weighted_mask_loss
 from unet.targets import mask_target, speech_frames
 
@@ -18,6 +19,43 @@ def test_mask_shape_and_range_for_any_length(n_frames):
     assert float(m.min()) >= 0.0 and float(m.max()) <= 1.0
 
 
+@pytest.mark.parametrize("n_frames", [1, 17, 256, 301])
+def test_bilstm_mask_shape_and_range_for_any_length(n_frames):
+    model = BiLSTM(hidden=16).eval()
+    x = torch.randn(2, 257, n_frames) * 3 - 5
+    with torch.no_grad():
+        m = model(x)
+    assert m.shape == (2, 257, n_frames)
+    assert float(m.min()) >= 0.0 and float(m.max()) <= 1.0
+
+
+def test_bilstm_default_size_matches_the_unet():
+    assert abs(n_parameters(BiLSTM()) - n_parameters(UNet())) < 0.02 * n_parameters(UNet())
+
+
+def test_build_model_follows_the_config():
+    assert isinstance(build_model(TrainConfig().to_dict()), UNet)
+    assert isinstance(build_model(TrainConfig(arch="bilstm").to_dict()), BiLSTM)
+    old = {k: v for k, v in TrainConfig().to_dict().items() if k != "arch"}   # checkpoints before arch existed
+    assert isinstance(build_model(old), UNet)
+    with pytest.raises(ValueError):
+        build_model(TrainConfig(arch="gru").to_dict())
+
+
+def test_auto_device_keeps_the_bilstm_off_mps():
+    from unet.train import pick_device
+    assert pick_device("auto", "bilstm").type != "mps"
+    assert pick_device("cpu", "bilstm").type == "cpu"
+
+
+def test_bilstm_normalization_is_saved():
+    model = BiLSTM(hidden=16)
+    model.set_normalization(np.full(257, -4.0), np.full(257, 2.0))
+    restored = BiLSTM(hidden=16)
+    restored.load_state_dict(model.state_dict())
+    assert torch.allclose(restored.in_std, torch.full((257,), 2.0))
+
+
 def test_default_size_and_normalization_is_saved():
     model = UNet()
     assert 1.5e6 < n_parameters(model) < 2.5e6
@@ -27,10 +65,11 @@ def test_default_size_and_normalization_is_saved():
     assert torch.allclose(restored.in_mean, torch.full((257,), -4.0))
 
 
-def test_can_overfit_one_example():
+@pytest.mark.parametrize("make", [lambda: UNet(base_channels=4), lambda: BiLSTM(hidden=32)], ids=["unet", "bilstm"])
+def test_can_overfit_one_example(make):
     """Gradients reach every layer: the network memorizes a single spectrogram/mask pair."""
     torch.manual_seed(0)
-    model = UNet(base_channels=4)
+    model = make()
     x, y = torch.randn(1, 257, 32), torch.rand(1, 257, 32)
     speech, valid = torch.ones(1, 32, dtype=torch.bool), torch.ones(1, 32, dtype=torch.bool)
     opt = torch.optim.AdamW(model.parameters(), lr=3e-3)

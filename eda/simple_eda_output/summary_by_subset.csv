@@ -1,0 +1,4 @@
+subset,pairs,speakers,minutes,mean_dur_s,snr_median,snr_speech_median,lsd_median,irm_mean
+testset,824,2,34.53,2.51,7.33,9.25,14.1,0.51
+trainset_28spk,11572,28,563.48,2.92,6.48,6.82,19.95,0.42
+trainset_56spk,23075,58,1141.85,2.97,6.46,6.67,19.65,0.42

@@ -5,6 +5,13 @@
       -> pad to multiples of 16 -> 4 x [DoubleConv, MaxPool 2x2] -> bottleneck DoubleConv
       -> 4 x [ConvTranspose 2x2, concat skip, DoubleConv] -> 1x1 conv -> sigmoid
       -> crop back to (B, 257, T) = mask M;   enhanced STFT = M * Y (noisy phase kept)
+
+BiLSTM is the recurrent alternative with the same input, output and normalization, so training,
+the loss, enhancement and checkpoints work unchanged (TrainConfig.arch picks one):
+
+    noisy log|Y| (B, 257, T) -> per-bin standardization
+      -> 2-layer bidirectional LSTM over time (each frame's 257 bins in, 2 x 208 out)
+      -> linear 416 -> 257 per frame -> sigmoid = mask M (B, 257, T)
 """
 from __future__ import annotations
 
@@ -71,6 +78,39 @@ class UNet(nn.Module):
             x = conv(torch.cat([up(x), skip], dim=1))
 
         return torch.sigmoid(self.head(x))[:, 0, :n_f, :n_t]
+
+
+class BiLSTM(nn.Module):
+    """Bidirectional LSTM over spectrogram frames, predicting a [0, 1] mask per bin.
+
+    The default size (2 layers, hidden 208) has 1.93M parameters, matching the U-Net's 1.94M, so a
+    comparison between the two is about recurrence vs convolution, not capacity."""
+    def __init__(self, n_bins: int = 257, hidden: int = 208, layers: int = 2):
+        super().__init__()
+        self.n_bins = n_bins
+        self.register_buffer("in_mean", torch.zeros(n_bins))
+        self.register_buffer("in_std", torch.ones(n_bins))
+        self.lstm = nn.LSTM(n_bins, hidden, num_layers=layers, batch_first=True, bidirectional=True)
+        self.head = nn.Linear(2 * hidden, n_bins)
+
+    set_normalization = UNet.set_normalization
+
+    def forward(self, log_mag: torch.Tensor) -> torch.Tensor:
+        """log_mag: (B, F, T) noisy log-magnitude -> mask (B, F, T) in [0, 1]. Any T, no padding."""
+        x = (log_mag - self.in_mean[:, None]) / self.in_std[:, None]
+        h, _ = self.lstm(x.transpose(1, 2))                 # (B, T, F) -> (B, T, 2 * hidden)
+        return torch.sigmoid(self.head(h)).transpose(1, 2)
+
+
+def build_model(config: dict) -> nn.Module:
+    """The network a TrainConfig (or a checkpoint's saved config) asks for. Older configs have no
+    "arch" and are U-Nets."""
+    arch = config.get("arch", "unet")
+    if arch == "unet":
+        return UNet(base_channels=config["base_channels"])
+    if arch == "bilstm":
+        return BiLSTM(hidden=config["lstm_hidden"], layers=config["lstm_layers"])
+    raise ValueError(f"unknown arch {arch!r} (unet or bilstm)")
 
 
 def n_parameters(model: nn.Module) -> int:
