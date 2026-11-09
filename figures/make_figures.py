@@ -33,20 +33,23 @@ INK, MUTED, GRID = "#1f2328", "#59636e", "#d8dee4"
 BLUE, ORANGE, AQUA, YELLOW = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 BASELINE, CEILING = "#8c959f", "#c6ccd2"
 
-# (label, metric CSV, family) in display order, top to bottom.
+# (label, metric CSV, family) in display order, top to bottom: the main results table. The U-Net
+# training-set runs are the rerun trio (one machine, one setup); the experiments are on their own figure.
 SYSTEMS = [
     ("Ridge regression", "linear_baseline__outputs__ridge_28spk", "baseline"),
     ("Wiener, min. statistics", "wiener_baseline__outputs__wiener_minstats_test", "baseline"),
     ("Wiener, leading noise", "wiener_baseline__outputs__wiener_leading_test", "baseline"),
     ("BiLSTM (same size as U-Net)", "unet_model__outputs__bilstm_28spk", "bilstm"),
-    ("U-Net, half width", "unet_model__outputs__unet_28spk_c8", "unet"),
-    ("U-Net, plain MSE", "unet_model__outputs__unet_28spk_sw1", "unet"),
-    ("U-Net (main)", "unet_model__outputs__unet_28spk", "unet"),
+    ("U-Net, 28spk", "unet_model__outputs__unet_28spk_rerun", "unet"),
+    ("U-Net, 56spk", "unet_model__outputs__unet_56spk", "unet"),
+    ("U-Net, 28spk + 56spk", "unet_model__outputs__unet_both", "unet"),
     ("U-Net, phase-sensitive mask", "unet_model__outputs__unet_28spk_psm", "unet"),
     ("Oracle mask (ceiling)", "wiener_baseline__outputs__oracle_test", "oracle"),
 ]
+# The experiments' baseline: the original main run, trained in the same setup as every experiment.
 MAIN = "unet_model__outputs__unet_28spk"
 EXPERIMENTS = [
+    ("Retrained, same settings", "unet_model__outputs__unet_28spk_rerun"),
     ("Phase-sensitive mask", "unet_model__outputs__unet_28spk_psm"),
     ("Plain MSE (silence weight 1.0)", "unet_model__outputs__unet_28spk_sw1"),
     ("Half width (¼ parameters)", "unet_model__outputs__unet_28spk_c8"),
@@ -131,8 +134,8 @@ def experiments_figure():
     runs = [(label, load(name)) for label, name in EXPERIMENTS]
     stems = sorted(set(main).intersection(*(set(r) for _, r in runs)))
     labels = [label for label, _ in runs]
-    colors = [BLUE, ORANGE, AQUA, YELLOW]
-    fig, axes = plt.subplots(1, 3, figsize=(13, 4.0), sharey=True)
+    colors = [BASELINE, BLUE, ORANGE, AQUA, YELLOW]   # gray: retraining noise, not an experiment
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.6), sharey=True)
     for ax, key, title, fmt in [
         (axes[0], "pesq_wb_processed", "PESQ-WB", "{:+.3f}"),
         (axes[1], "stoi_processed", "STOI", "{:+.4f}"),
@@ -142,7 +145,8 @@ def experiments_figure():
         diffs = [column(r, stems, key) - base for _, r in runs]
         bar_panel(ax, labels, [d.mean() for d in diffs], [bootstrap_ci(d) for d in diffs], colors,
                   title, fmt)
-    fig.suptitle("Each experiment minus the main U-Net, file by file (positive = better; bars: 95% intervals)",
+    fig.suptitle("Each run minus the original main U-Net, file by file (positive = better; bars: 95% intervals). "
+                 "Gray: the same model retrained, i.e. the noise level",
                  x=0.01, ha="left", color=MUTED, fontsize=10, y=1.0)
     fig.tight_layout()
     save(fig, "experiments.png")
