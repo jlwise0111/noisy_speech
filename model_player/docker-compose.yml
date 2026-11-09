@@ -1,0 +1,13 @@
+services:
+  player:
+    build:
+      context: ..
+      dockerfile: model_player/Dockerfile
+    image: speech-model-player
+    ports:
+      - "127.0.0.1:${PORT:-8502}:8502"
+    volumes:
+      # Trained runs: */outputs/* of the project folder (read-only).
+      - "${MODELS_DIR:-..}:/models:ro"
+      # Valentini dataset for the train/test file picker; an empty folder if DATASET_DIR is unset.
+      - "${DATASET_DIR:-./no_dataset}:/dataset:ro"
