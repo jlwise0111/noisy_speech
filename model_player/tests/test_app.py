@@ -31,7 +31,7 @@ def test_dataset_file_runs_every_model(models, tmp_path, monkeypatch):
     assert not at.error, [e.value for e in at.error]
     assert at.radio(key="mode").value == "Dataset file"
     assert at.selectbox(key="split").options == ["Test set", "Train 28spk"]
-    assert any("p232_000" in m.value and "9 model outputs" in m.value for m in at.markdown)
+    assert any("p232_000" in m.value and "10 model outputs" in m.value for m in at.markdown)
 
 
 def test_loudness_switch_lives_in_the_player_and_next_file(models, tmp_path, monkeypatch):

@@ -20,7 +20,7 @@ TARGET_LUFS = loudness.TARGET_LUFS
 DB_RANGE = (-110, -20)
 SR = engine.SR
 FAMILY_COLORS = {"clean": "#4fd1a5", "noisy": "#f5a142", "ridge": "#f39c12", "wiener": "#5fb3d9",
-                 "unet": "#a495ff", "oracle": "#9aa3b1"}
+                 "unet": "#a495ff", "bilstm": "#e87ba4", "oracle": "#9aa3b1"}
 
 st.set_page_config(page_title="Model Player", page_icon="🎛️", layout="wide")
 st.markdown("""<style>
